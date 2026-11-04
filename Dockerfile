@@ -1,31 +1,11 @@
-ARG BASE_IMAGE=nvcr.io/nvidia/pytorch:26.08-py3
-FROM ${BASE_IMAGE}
-
-ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1 \
-    PIP_NO_CACHE_DIR=1 \
-    PYTHONPATH=/app/backend
-
+FROM python:3.12-slim
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PYTHONPATH=/app/backend PANMAN_DATA_ROOT=/data
 WORKDIR /app
-
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends build-essential cmake curl espeak-ng ffmpeg git libsndfile1 ninja-build python3-venv tesseract-ocr tesseract-ocr-eng tesseract-ocr-hin libreoffice-writer libreoffice-calc libreoffice-impress \
-    && rm -rf /var/lib/apt/lists/*
-
-RUN python -m venv --system-site-packages /opt/texmin-venv
-ENV PATH="/opt/texmin-venv/bin:${PATH}"
-
-COPY backend/requirements.txt /tmp/backend-requirements.txt
-COPY frontend/requirements.txt /tmp/frontend-requirements.txt
-RUN python -m pip install --no-cache-dir --upgrade pip setuptools wheel \
-    && python -m pip install --no-cache-dir -r /tmp/backend-requirements.txt -r /tmp/frontend-requirements.txt \
-    && python -c "from piper import PiperVoice, SynthesisConfig; from kokoro import KModel, KPipeline; print('Offline speech runtimes ready')"
-
+RUN apt-get update && apt-get install -y --no-install-recommends tesseract-ocr tesseract-ocr-eng tesseract-ocr-hin libreoffice-writer libreoffice-calc libreoffice-impress && rm -rf /var/lib/apt/lists/*
+COPY backend/requirements.txt /tmp/requirements.txt
+RUN pip install --no-cache-dir -r /tmp/requirements.txt
 COPY backend /app/backend
 COPY frontend /app/frontend
-RUN PYTHONPATH=/app/backend:/app/frontend python -c "import config; from avatar_renderer import avatar_asset_manifest, import_map; avatar_asset_manifest(config.AVATAR_MODEL_FILE); import_map()"
-
-EXPOSE 8501
-
-WORKDIR /app/frontend
-CMD ["streamlit", "run", "app.py", "--server.address=0.0.0.0", "--server.port=8501", "--browser.gatherUsageStats=false"]
+RUN PYTHONPATH=/app/backend:/app/frontend python -c "import config; from avatar_renderer import avatar_asset_manifest; avatar_asset_manifest(config.AVATAR_MODEL_FILE)"
+EXPOSE 8000
+CMD ["uvicorn", "main:app", "--app-dir", "backend", "--host", "0.0.0.0", "--port", "8000", "--workers", "1", "--ws-max-size", "15000000"]

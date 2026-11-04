@@ -21,7 +21,7 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from openpyxl import load_workbook
 from pptx import Presentation
 
-from services.embedding_service import PromptedOllamaEmbeddings, embedding_profile
+from services.embedding_service import OpenAIEmbeddings, embedding_profile
 from services.document_parsers import parse as parse_structured_file
 from services.language_service import detect_language
 from services.lexical_service import add_lexical_chunks, delete_lexical_ids, reset_lexical_collection
@@ -88,11 +88,10 @@ def chunk_settings() -> dict:
     profile = embedding_profile()
     return {
         "version": INGESTION_VERSION,
-        "embedding_provider": "ollama",
+        "embedding_provider": "openai",
         "embedding_model": profile.model,
         "embedding_profile": profile.as_dict(),
-        "embedding_dimensions": int(config.OLLAMA_EMBED_DIMENSIONS),
-        "ollama_base_url": config.OLLAMA_BASE_URL,
+        "embedding_dimensions": int(config.OPENAI_EMBED_DIMENSIONS),
         "chunk_size": int(config.CHUNK_SIZE),
         "chunk_overlap": int(config.CHUNK_OVERLAP),
         "collection_name": config.CHROMA_COLLECTION_NAME,
@@ -561,11 +560,16 @@ def create_vector_store(
             pass
 
     profile = embedding_profile()
-    embeddings = PromptedOllamaEmbeddings(
+    embeddings = OpenAIEmbeddings(
         profile=profile,
-        base_url=config.OLLAMA_BASE_URL,
-        keep_alive=int(config.OLLAMA_KEEP_ALIVE),
     )
+    try:
+        existing = client.get_collection(collection_name)
+        meta = existing.metadata or {}
+        if meta.get("embedding_profile") != profile.fingerprint or meta.get("embedding_dimensions") != profile.dimensions:
+            raise RuntimeError("Refusing to open an incompatible embedding collection")
+    except chromadb.errors.NotFoundError:
+        pass
     vector_store = Chroma(
         client=client,
         collection_name=collection_name,
@@ -574,7 +578,7 @@ def create_vector_store(
             "hnsw:space": "cosine",
             "embedding_model": profile.model,
             "embedding_profile": profile.fingerprint,
-            "embedding_dimensions": int(config.OLLAMA_EMBED_DIMENSIONS),
+            "embedding_dimensions": int(config.OPENAI_EMBED_DIMENSIONS),
             "ingestion_version": INGESTION_VERSION,
         },
     )
@@ -886,13 +890,12 @@ def train(raw_data_dir: Path, force_rebuild: bool = False) -> None:
 
 
 def _retrieval_recall(vector_store: Chroma, collection_name: str, cases: list[dict], top_k: int = 5) -> float:
-    from services.qa_service import _retrieve_context, _source_chunks
+    from services.retrieval import retrieve_from_store
 
     scores = []
     for case in cases:
-        docs = _retrieve_context(vector_store, case["question"], top_k,
-                                 lexical_collection_name=collection_name)
-        sources = [source.source or "" for source in _source_chunks(docs)]
+        docs = retrieve_from_store(vector_store, case["question"], top_k)
+        sources = [doc.metadata.get("source", "") for doc in docs]
         expected = case["expected_sources"]
         scores.append(sum(any(name.casefold() in source.casefold() for source in sources)
                           for name in expected) / len(expected))
@@ -917,13 +920,12 @@ def promote_candidate() -> None:
     if collection.count() != expected_vectors:
         raise RuntimeError(f"Candidate vector count mismatch: {collection.count()} versus {expected_vectors} in the manifest.")
     peek = collection.peek(1)
-    if not len(peek.get("embeddings", [])) or len(peek["embeddings"][0]) != int(config.OLLAMA_EMBED_DIMENSIONS):
+    if not len(peek.get("embeddings", [])) or len(peek["embeddings"][0]) != int(config.OPENAI_EMBED_DIMENSIONS):
         raise RuntimeError("Candidate embedding dimensions do not match the configured model.")
     evaluation_file = Path(config.INDEX_PROMOTION_EVAL_FILE)
     if not evaluation_file.is_file():
         raise RuntimeError(f"Promotion evaluation data is missing: {evaluation_file}")
-    from evaluate_retrieval import load_cases
-    cases = load_cases(evaluation_file)
+    cases = [json.loads(line) for line in evaluation_file.read_text(encoding="utf-8").splitlines() if line.strip() and not line.startswith("#")]
     if not cases:
         raise RuntimeError("Promotion evaluation data has no labelled questions.")
     candidate_store, _, _ = create_vector_store(collection_name=collection_name)

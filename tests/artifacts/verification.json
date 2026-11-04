@@ -1,0 +1,9 @@
+{
+  "unit_integration_tests": 50,
+  "failed": 0,
+  "dependency_warnings": 3,
+  "browser_acceptance": "passed with synthetic microphone and mocked remote speech",
+  "live_openai": "not run: API key absent",
+  "docker_build": "not run: Docker unavailable",
+  "health_http_status": 200
+}

@@ -1,129 +1,18 @@
 services:
-  ollama:
-    image: ollama/ollama:0.34.0
-    container_name: texmin-ollama
-    restart: unless-stopped
-    volumes:
-      - ollama_models:/root/.ollama
-    environment:
-      NVIDIA_VISIBLE_DEVICES: all
-      NVIDIA_DRIVER_CAPABILITIES: compute,utility
-      OLLAMA_HOST: 0.0.0.0:11434
-      OLLAMA_NO_CLOUD: "1"
-      OLLAMA_FLASH_ATTENTION: "1"
-      OLLAMA_KV_CACHE_TYPE: q8_0
-      OLLAMA_MAX_LOADED_MODELS: "2"
-      OLLAMA_NUM_PARALLEL: "1"
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
-    healthcheck:
-      test: ["CMD", "ollama", "list"]
-      interval: 10s
-      timeout: 5s
-      retries: 20
-
-  ollama-model-init:
-    image: python:3.12-alpine
-    depends_on:
-      ollama:
-        condition: service_healthy
-    working_dir: /app
-    volumes:
-      - ./backend/config.py:/app/config.py:ro
-      - ./backend/scripts/provision_ollama.py:/app/scripts/provision_ollama.py:ro
-    command: ["python", "scripts/provision_ollama.py", "--offline"]
-
-  config-init:
-    image: python:3.12-alpine
-    working_dir: /app
-    volumes:
-      - ./backend/config.py:/app/config.py:ro
-      - ./backend/scripts/configure_gateway.py:/app/scripts/configure_gateway.py:ro
-      - ./Caddyfile:/app/Caddyfile.template:ro
-      - gateway_config:/generated
-    command: ["python", "scripts/configure_gateway.py", "/app/Caddyfile.template", "/generated/Caddyfile"]
-
-  backend-model-init:
-    build:
-      context: ./backend
-    depends_on:
-      ollama-model-init:
-        condition: service_completed_successfully
-    volumes:
-      - ./backend/config.py:/app/config.py:ro
-      - ai_models:/models
-    command: ["python", "scripts/provision_models.py", "--offline"]
-
-  index-init:
-    build:
-      context: ./backend
-    depends_on:
-      backend-model-init:
-        condition: service_completed_successfully
-    volumes:
-      - ./backend/config.py:/app/config.py:ro
-      - ./backend/raw_data_files:/app/raw_data_files:ro
-      - ./backend/vector_db:/app/vector_db
-    command: ["python", "train_engine.py"]
-
   app:
-    build:
-      context: .
-    container_name: texmin-app
+    build: .
     restart: unless-stopped
-    ipc: host
-    ulimits:
-      memlock: -1
-      stack: 67108864
-    depends_on:
-      index-init:
-        condition: service_completed_successfully
+    environment:
+      OPENAI_API_KEY: ${OPENAI_API_KEY:?Set OPENAI_API_KEY in the process environment}
+      PANMAN_DATA_ROOT: /data
     volumes:
       - ./backend/config.py:/app/backend/config.py:ro
-      - ./backend/raw_data_files:/app/raw_data_files:ro
-      - ./backend/vector_db:/app/vector_db
-      - ai_models:/models
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
+      - ./backend/raw_data_files:/data/raw_data_files:ro
+      - ./backend/vector_db:/data/vector_db
     ports:
-      - "127.0.0.1:8501:8501"
+      - "127.0.0.1:8000:8000"
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8501/_stcore/health').read()"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')"]
       interval: 30s
-      timeout: 10s
-      retries: 5
-      start_period: 180s
-
-  gateway:
-    image: caddy:2.10.2-alpine
-    container_name: texmin-gateway
-    restart: unless-stopped
-    depends_on:
-      app:
-        condition: service_healthy
-      config-init:
-        condition: service_completed_successfully
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - gateway_config:/etc/caddy:ro
-      - caddy_data:/data
-      - caddy_config:/config
-
-volumes:
-  ollama_models:
-  ai_models:
-  caddy_data:
-  caddy_config:
-  gateway_config:
+      timeout: 5s
+      retries: 3

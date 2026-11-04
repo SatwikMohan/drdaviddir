@@ -1,0 +1,174 @@
+{
+  "source": "frontend/assets/scene.gltf",
+  "files": {
+    "scene.gltf": {
+      "bytes": 2768,
+      "sha256": "31a3f9ab19d626853a0b9d40e9e7251b35a812b929e141f95297636c8302043f"
+    },
+    "buffer.bin": {
+      "bytes": 2758320,
+      "sha256": "d12daaf2eaf1774e90899b26993407891dedd90d02cca019f6e7e101de531413"
+    },
+    "metallicRoughness_1.png": {
+      "bytes": 5177004,
+      "sha256": "89668cd8628e78b29d4fa0be2c8dd45620791c633af9c66438002495b244ac7c"
+    },
+    "baseColor_1.png": {
+      "bytes": 23632772,
+      "sha256": "86710be5ffa8a874c304972ba27d08afa13149d2caffed46e1f0530f99b87841"
+    }
+  },
+  "meshes": [
+    {
+      "index": 0,
+      "name": null,
+      "node_names": [
+        "output_unwrapped"
+      ],
+      "target_names": [],
+      "default_weights": [],
+      "primitives": [
+        {
+          "vertices": 76620,
+          "indices": 76620,
+          "attributes": {
+            "POSITION": 0,
+            "NORMAL": 1,
+            "TEXCOORD_0": 2
+          },
+          "material": 0,
+          "morph_target_count": 0,
+          "targets": [],
+          "topology": {
+            "triangles": 25540,
+            "exact_unique_positions": 12767,
+            "position_welded_components": 1,
+            "position_welded_boundary_edges": 39,
+            "position_welded_nonmanifold_edges": 27
+          }
+        }
+      ]
+    }
+  ],
+  "nodes": [
+    {
+      "name": "output_unwrapped",
+      "rotation": [
+        -0.7071067690849302,
+        0,
+        0,
+        0.7071067932881648
+      ],
+      "scale": [
+        100,
+        99.99999657714586,
+        99.99999657714586
+      ],
+      "mesh": 0
+    },
+    {
+      "name": "FBX_Root",
+      "scale": [
+        0.009999999776482582,
+        0.009999999776482582,
+        0.009999999776482582
+      ],
+      "children": [
+        0
+      ]
+    }
+  ],
+  "skins": [],
+  "animations": [],
+  "materials": [
+    {
+      "name": "Material_001",
+      "pbrMetallicRoughness": {
+        "roughnessFactor": 0.5,
+        "metallicFactor": 0,
+        "baseColorTexture": {
+          "index": 0
+        },
+        "metallicRoughnessTexture": {
+          "index": 1
+        }
+      }
+    }
+  ],
+  "textures": [
+    {
+      "source": 1,
+      "sampler": 0
+    },
+    {
+      "source": 0,
+      "sampler": 0
+    }
+  ],
+  "images": [
+    {
+      "mimeType": "image/png",
+      "uri": "metallicRoughness_1.png"
+    },
+    {
+      "mimeType": "image/png",
+      "uri": "baseColor_1.png"
+    }
+  ],
+  "accessors": [
+    {
+      "type": "VEC3",
+      "componentType": 5126,
+      "count": 76620,
+      "max": [
+        0.47082099318504333,
+        0.19588501751422882,
+        0.9498090147972107
+      ],
+      "min": [
+        -0.4791580140590668,
+        -0.20148107409477234,
+        -0.9517199993133545
+      ],
+      "bufferView": 0,
+      "byteOffset": 0
+    },
+    {
+      "type": "VEC3",
+      "componentType": 5126,
+      "count": 76620,
+      "bufferView": 0,
+      "byteOffset": 12
+    },
+    {
+      "type": "VEC2",
+      "componentType": 5126,
+      "count": 76620,
+      "bufferView": 0,
+      "byteOffset": 24
+    },
+    {
+      "type": "SCALAR",
+      "componentType": 5125,
+      "count": 76620,
+      "bufferView": 1,
+      "byteOffset": 0
+    }
+  ],
+  "buffer_views": [
+    {
+      "buffer": 0,
+      "byteOffset": 0,
+      "byteLength": 2451840,
+      "byteStride": 32,
+      "target": 34962
+    },
+    {
+      "buffer": 0,
+      "byteOffset": 2451840,
+      "byteLength": 306480,
+      "target": 34963
+    }
+  ],
+  "note": "Topology is global, not anatomical proof of lips, eyelids, teeth or a mouth cavity."
+}

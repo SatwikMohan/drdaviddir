@@ -1,130 +1,88 @@
-import config
+"""Profile-isolated, persistent content-hash cache for OpenAI vectors."""
 import hashlib
 import json
-import os
-import urllib.error
-import urllib.request
-import time
+import math
+import sqlite3
 import threading
+import time
 from dataclasses import dataclass
-
+from pathlib import Path
 from langchain_core.embeddings import Embeddings
-from langchain_ollama import OllamaEmbeddings
+import config
+from services.openai_service import client, usage, record_usage
 
-
-EMBEDDING_PROFILE_VERSION = 1
-
+_LOCK = threading.RLock()
 
 @dataclass(frozen=True)
 class EmbeddingProfile:
     model: str
-    query_prefix: str
-    document_prefix: str
-    version: int = EMBEDDING_PROFILE_VERSION
+    query_prefix: str = ""
+    document_prefix: str = ""
+    dimensions: int = config.OPENAI_EMBED_DIMENSIONS
+    normalization: str = config.EMBED_NORMALIZATION
+    version: int = 2
 
     @property
-    def fingerprint(self) -> str:
-        payload = json.dumps(
-            {
-                "model": self.model,
-                "query_prefix": self.query_prefix,
-                "document_prefix": self.document_prefix,
-                "version": self.version,
-            },
-            sort_keys=True,
-        )
-        return hashlib.sha1(payload.encode("utf-8")).hexdigest()[:12]
+    def fingerprint(self):
+        return hashlib.sha256(json.dumps(self.__dict__, sort_keys=True).encode()).hexdigest()[:16]
 
-    def as_dict(self) -> dict:
-        return {
-            "model": self.model,
-            "query_prefix": self.query_prefix,
-            "document_prefix": self.document_prefix,
-            "version": self.version,
-            "fingerprint": self.fingerprint,
-        }
+    def as_dict(self):
+        return dict(self.__dict__, fingerprint=self.fingerprint, provider="openai")
 
+def embedding_profile(model=None):
+    return EmbeddingProfile(model or config.OPENAI_EMBED_MODEL,
+        config.EMBED_QUERY_PREFIX, config.EMBED_DOCUMENT_PREFIX,
+        config.OPENAI_EMBED_DIMENSIONS, config.EMBED_NORMALIZATION)
 
-def embedding_profile(model: str | None = None) -> EmbeddingProfile:
-    model = (model or config.OLLAMA_EMBED_MODEL).strip()
-    normalized = model.lower().split(":", 1)[0]
+class OpenAIEmbeddings(Embeddings):
+    def __init__(self, profile=None):
+        self.profile = profile or embedding_profile()
+        self.last_documents_ms = 0
 
-    if "embeddinggemma" in normalized:
-        query_prefix = "task: search result | query: "
-        document_prefix = "title: none | text: "
-    elif "nomic-embed-text" in normalized:
-        query_prefix = "search_query: "
-        document_prefix = "search_document: "
-    elif "qwen3-embedding" in normalized:
-        query_prefix = (
-            "Instruct: Given a user question, retrieve relevant passages that answer the question\n"
-            "Query: "
-        )
-        document_prefix = ""
-    else:
-        query_prefix = ""
-        document_prefix = ""
+    def _vectors(self, texts):
+        keys = [hashlib.sha256((self.profile.fingerprint+"\0"+text).encode()).hexdigest() for text in texts]
+        Path(config.EMBED_CACHE_FILE).parent.mkdir(parents=True, exist_ok=True)
+        # Serialize cache misses in this process, including overlapping ingestion batches.
+        with _LOCK, sqlite3.connect(config.EMBED_CACHE_FILE, timeout=60) as db:
+            db.execute("CREATE TABLE IF NOT EXISTS vectors (key TEXT PRIMARY KEY, vector TEXT NOT NULL)")
+            found = {}
+            for key in set(keys):
+                row = db.execute("SELECT vector FROM vectors WHERE key=?", (key,)).fetchone()
+                if row:
+                    vector = json.loads(row[0])
+                    if len(vector) != self.profile.dimensions or not all(math.isfinite(v) for v in vector):
+                        raise ValueError("Invalid cached vector")
+                    found[key] = vector
+            missing = list(dict.fromkeys(key for key in keys if key not in found))
+            inputs = dict(zip(keys, texts))
+            for offset in range(0, len(missing), config.EMBEDDING_BATCH_SIZE):
+                batch = missing[offset:offset+config.EMBEDDING_BATCH_SIZE]
+                with usage("embeddings", self.profile.model) as record:
+                    response = client().embeddings.create(model=self.profile.model,
+                        dimensions=self.profile.dimensions, input=[inputs[key] for key in batch])
+                    record_usage(record, response)
+                ordered = sorted(response.data, key=lambda item: item.index)
+                if len(ordered) != len(batch):
+                    raise ValueError("Embedding count mismatch")
+                for key, item in zip(batch, ordered):
+                    vector = item.embedding
+                    if len(vector) != self.profile.dimensions or not all(math.isfinite(v) for v in vector):
+                        raise ValueError("Embedding dimension or value mismatch")
+                    norm = math.sqrt(sum(v*v for v in vector))
+                    if norm == 0:
+                        raise ValueError("Zero embedding")
+                    if self.profile.normalization == "l2":
+                        vector = [v/norm for v in vector]
+                    found[key] = vector
+                    db.execute("INSERT OR REPLACE INTO vectors VALUES (?, ?)", (key, json.dumps(vector)))
+                db.commit()
+            return [found[key] for key in keys]
 
-    return EmbeddingProfile(
-        model=model,
-        query_prefix=query_prefix if config.EMBED_QUERY_PREFIX is None else config.EMBED_QUERY_PREFIX,
-        document_prefix=document_prefix if config.EMBED_DOCUMENT_PREFIX is None else config.EMBED_DOCUMENT_PREFIX,
-    )
-
-
-class PromptedOllamaEmbeddings(Embeddings):
-    """Ollama embeddings with asymmetric query/document retrieval prompts."""
-
-    def __init__(self, profile: EmbeddingProfile, base_url: str, keep_alive: int):
-        self.profile = profile
-        self._timing = threading.local()
-        self._client = OllamaEmbeddings(
-            model=profile.model,
-            base_url=base_url,
-            keep_alive=keep_alive,
-            client_kwargs={"timeout": float(config.OLLAMA_REQUEST_TIMEOUT_SECONDS)},
-        )
-
-    def embed_documents(self, texts: list[str]) -> list[list[float]]:
-        prefix = self.profile.document_prefix
-        prepared = [f"{prefix}{text}" if prefix else text for text in texts]
-        started = time.perf_counter()
-        vectors = self._client.embed_documents(prepared)
-        self._timing.documents_ms = (time.perf_counter() - started) * 1000
-        if any(len(vector) != int(config.OLLAMA_EMBED_DIMENSIONS) for vector in vectors):
-            raise ValueError("Embedding dimensions do not match OLLAMA_EMBED_DIMENSIONS; keep the current index active and rebuild a compatible collection.")
+    def embed_documents(self, texts):
+        started = time.monotonic()
+        vectors = self._vectors([self.profile.document_prefix+t for t in texts])
+        self.last_documents_ms = (time.monotonic()-started)*1000
         return vectors
 
-    @property
-    def last_documents_ms(self) -> float:
-        return getattr(self._timing, "documents_ms", 0.0)
-
-    def embed_query(self, text: str) -> list[float]:
-        prefix = self.profile.query_prefix
-        vector = self._client.embed_query(f"{prefix}{text}" if prefix else text)
-        if len(vector) != int(config.OLLAMA_EMBED_DIMENSIONS):
-            raise ValueError(
-                "Query embedding dimensions do not match OLLAMA_EMBED_DIMENSIONS; "
-                "keep the current index active and rebuild a compatible collection."
-            )
-        return vector
-
-
-def ollama_model_names(base_url: str, timeout_seconds: float = 3.0) -> set[str]:
-    request = urllib.request.Request(f"{base_url.rstrip('/')}/api/tags")
-    try:
-        with urllib.request.urlopen(request, timeout=timeout_seconds) as response:
-            payload = json.loads(response.read().decode("utf-8"))
-    except (OSError, urllib.error.URLError, json.JSONDecodeError) as exc:
-        raise RuntimeError(f"Ollama is unavailable at {base_url}: {exc}") from exc
-
-    return {str(model.get("name", "")) for model in payload.get("models", []) if model.get("name")}
-
-
-def model_is_available(configured_model: str, installed_models: set[str]) -> bool:
-    configured_model = configured_model.strip()
-    if configured_model in installed_models:
-        return True
-    if ":" not in configured_model and f"{configured_model}:latest" in installed_models:
-        return True
-    return False
+    def embed_query(self, text):
+        return self._vectors([self.profile.query_prefix+" ".join(text.split())])[0]

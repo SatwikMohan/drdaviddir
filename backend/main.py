@@ -1,79 +1,116 @@
+"""Same-origin voice application. Run one worker; session ownership is in-process."""
+import asyncio
+import json
+import logging
+import sys
+from contextlib import asynccontextmanager
+from functools import lru_cache
+from pathlib import Path
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 import config
 
-config.configure_runtime_environment()
+FRONTEND = Path(__file__).resolve().parents[1] / "frontend"
+sys.path.insert(0, str(FRONTEND))
+from avatar_renderer import render_script, avatar_asset_manifest
+from services.conversation import Conversation
+from services.retrieval import active_store
+from services import openai_service
 
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
-import threading
-from fastapi.responses import JSONResponse
+@asynccontextmanager
+async def lifespan(app):
+    config.validate_config()
+    logging.basicConfig(level=logging.INFO)
+    app.state.capacity = asyncio.Semaphore(config.OPENAI_MAX_CONCURRENT)
+    app.state.sessions = 0
+    yield
+    if openai_service.async_client.cache_info().currsize:
+        await openai_service.async_client().close()
+        openai_service.async_client.cache_clear()
+    if openai_service.client.cache_info().currsize:
+        openai_service.client().close()
+        openai_service.client.cache_clear()
 
-from routes.qa_routes import router as qa_router
-from routes.stt_routes import router as stt_router
-from routes.tts_routes import router as tts_router
-from services.qa_service import runtime_status, warm_up_qa_engine
-from services.reranker_service import reranker_runtime_status
-from services.stt_service import stt_runtime_status, warm_up_stt
-from services.tts_service import tts_runtime_status, warm_up_tts
+app = FastAPI(title=config.ASSISTANT_NAME, lifespan=lifespan)
+app.mount("/static", StaticFiles(directory=FRONTEND / "voice"), name="static")
 
+@lru_cache(maxsize=1)
+def page():
+    modules, renderer = render_script()
+    html = (FRONTEND / "voice" / "index.html").read_text(encoding="utf-8")
+    return html.replace("__IMPORTMAP__", modules).replace("__RENDERER__", renderer)
 
-app = FastAPI(title="Texmin AI QA Bot")
-app.add_middleware(CORSMiddleware, allow_origins=list(config.BROWSER_ALLOWED_ORIGINS), allow_methods=["POST"], allow_headers=["Content-Type"])
-app.include_router(qa_router)
-app.include_router(stt_router)
-app.include_router(tts_router)
+@app.get("/", response_class=HTMLResponse)
+def home():
+    return page()
 
-
-def system_status() -> dict:
-    status = runtime_status()
-    status["stt"] = stt_runtime_status()
-    status["tts"] = tts_runtime_status()
-    status["reranker"] = reranker_runtime_status()
-    if (
-        status["stt"]["status"] != "ready"
-        or status["tts"]["status"] != "ready"
-        or status["reranker"]["status"] not in {"ready", "disabled"}
-    ):
-        status["status"] = "degraded"
-    return status
-
-
-@app.on_event("startup")
-def warm_up_local_models() -> None:
-    threading.Thread(target=_warm_up_local_models, daemon=True, name="model-warmup").start()
-
-
-def _warm_up_local_models() -> None:
-    try:
-        warm_up_tts()
-    except Exception as exc:
-        print(f"TTS warm-up skipped: {exc}")
-    try:
-        warm_up_qa_engine()
-    except Exception as exc:
-        print(f"QA warm-up skipped: {exc}")
-    try:
-        warm_up_stt()
-    except Exception as exc:
-        print(f"STT warm-up skipped: {exc}")
-    reranker_status = reranker_runtime_status()
-    if reranker_status["status"] == "unavailable":
-        print(f"Reranker warm-up skipped: {reranker_status.get('error')}")
-
+@app.get("/config")
+def browser_config():
+    # Explicit allowlist: never serialize the config module.
+    return dict(name=config.ASSISTANT_NAME, silenceMs=config.RECORDING_SILENCE_MS,
+        minSpeechMs=config.RECORDING_MIN_SPEECH_MS, maxRecordingMs=config.RECORDING_MAX_MS,
+        rmsThreshold=config.RECORDING_RMS_THRESHOLD, bargeThreshold=config.BARGE_IN_RMS_THRESHOLD,
+        preRollMs=config.RECORDING_PRE_ROLL_MS, bufferFrames=config.RECORDING_BUFFER_FRAMES,
+        bargeMs=config.BARGE_IN_MIN_MS,
+        queueLimit=config.AUDIO_QUEUE_LIMIT, turnTimeoutMs=config.TURN_TIMEOUT_SECONDS*1000)
 
 @app.get("/health")
-def health_check() -> dict:
-    return system_status()
-
+def health():
+    return {"status":"ok"}
 
 @app.get("/ready")
-def readiness_check():
-    # Optional speech/reranking must not make document chat unreachable.
-    # Deep component diagnostics remain available through /health.
-    status = runtime_status()
-    if status["status"] != "ok":
-        return JSONResponse(status_code=503, content=status)
-    return status
+def ready():
+    try:
+        if not config.OPENAI_API_KEY:
+            raise RuntimeError("Missing credentials")
+        active_store()
+        avatar_asset_manifest(config.AVATAR_MODEL_FILE)
+        return {"status":"ready", "provider_check":"not performed"}
+    except Exception:
+        return JSONResponse({"status":"not_ready", "message":"Configure credentials, assets and a compatible index."}, status_code=503)
+
+@app.websocket("/voice")
+async def voice(socket: WebSocket):
+    # Reject cross-site sockets; reverse proxy must preserve Host and Origin.
+    origin = socket.headers.get("origin", "")
+    host = socket.headers.get("host", "")
+    if origin not in config.BROWSER_ALLOWED_ORIGINS and origin not in {"http://"+host, "https://"+host}:
+        await socket.close(code=1008)
+        return
+    if app.state.sessions >= config.MAX_SESSIONS:
+        await socket.close(code=1013)
+        return
+    await socket.accept()
+    app.state.sessions += 1
+    session = Conversation(socket, app.state.capacity)
+    try:
+        while True:
+            raw = await asyncio.wait_for(socket.receive_text(), config.SESSION_IDLE_SECONDS)
+            if len(raw) > config.MAX_AUDIO_BYTES*1.4+1024:
+                await socket.close(code=1009)
+                break
+            message = json.loads(raw)
+            if not isinstance(message, dict):
+                raise ValueError("Expected an event object")
+            kind = message.get("type")
+            if kind == "utterance":
+                await session.start(message)
+            elif kind == "cancel":
+                await session.cancel()
+            elif kind == "played":
+                session.acknowledge(message)
+            elif kind == "recover" and message.get("request_id") == session.current:
+                await session.recover()
+    except (WebSocketDisconnect, TimeoutError):
+        pass
+    except (ValueError, TypeError, KeyError):
+        await socket.close(code=1008)
+    finally:
+        await session.cancel()
+        app.state.sessions -= 1
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host=config.API_HOST, port=config.API_PORT, log_level=config.API_LOG_LEVEL)
+    uvicorn.run(app, host=config.API_HOST, port=config.API_PORT, log_level=config.API_LOG_LEVEL,
+                ws_max_size=int(config.MAX_AUDIO_BYTES*1.4+1024))

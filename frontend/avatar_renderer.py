@@ -4,8 +4,14 @@ import base64
 import json
 import mimetypes
 import logging
+import sys
 from functools import lru_cache
 from pathlib import Path
+
+# Resolve shared configuration independently of the working directory or IDE launcher.
+BACKEND_ROOT = Path(__file__).resolve().parents[1] / "backend"
+if str(BACKEND_ROOT) not in sys.path:
+    sys.path.insert(0, str(BACKEND_ROOT))
 
 import config
 
@@ -134,6 +140,7 @@ try {
  const key=new THREE.DirectionalLight(0xffffff,2.8);key.position.set(2,3,4);scene.add(key);
  const rim=new THREE.DirectionalLight(0x65ffae,1.2);rim.position.set(-3,1,-3);scene.add(rim);
  let root=null,mixer=null,jaw=null,jawRest=0,head=null,headRest=0,baseY=0;
+ const lids=[];
  let loadedAt=0,lastProbe=0,renderConfirmed=false,renderFailureLogged=false;
  let center=new THREE.Vector3(),halfWidth=1,halfHeight=1,halfDepth=.3,context=null,analyser=null,samples=null,mouth=0;
  function resize(){
@@ -152,7 +159,8 @@ try {
   root.traverse(node=>{
    const name=(node.name||"").toLowerCase();
    if(node.isBone&&name.includes("jaw")&&!name.includes("unused")&&!jaw){jaw=node;jawRest=node.rotation.z}
-   if(node.isBone&&/root[_ ]head/.test(name)&&!head){head=node;headRest=node.rotation.z}
+   if(node.isBone&&/head neck upper/.test(name)&&!head){head=node;headRest=node.rotation.z}
+   if(node.isBone&&/eyelid.*upper middle/.test(name))lids.push({node,rest:node.rotation.z});
   });
   const box=new THREE.Box3().setFromObject(root);
   if(box.isEmpty()){notice.textContent="3D avatar has no visible geometry";console.error("Avatar model has no visible geometry");return}
@@ -162,8 +170,8 @@ try {
   const fitted=new THREE.Box3().setFromObject(root);
   center=fitted.getCenter(new THREE.Vector3());
   const fittedSize=fitted.getSize(new THREE.Vector3());
-  center.y=fitted.max.y-fittedSize.y*.27;
-  halfWidth=fittedSize.x*.42;halfHeight=fittedSize.y*.31;halfDepth=fittedSize.z/2;
+  center.y=fitted.max.y-fittedSize.y*__HEAD__;
+  halfWidth=fittedSize.x*__WIDTH__;halfHeight=fittedSize.y*__HEIGHT__;halfDepth=fittedSize.z*.15;
   if(gltf.animations.length){mixer=new THREE.AnimationMixer(root);mixer.clipAction(gltf.animations[0]).play()}
   resize();loadedAt=performance.now();
  },undefined,error=>{notice.textContent="3D avatar could not load. Check browser console.";console.error("Avatar GLTF load failed",error)});
@@ -176,6 +184,7 @@ try {
    if(context.state==="suspended")await context.resume();
   }catch(error){console.warn("Audio analysis unavailable; jaw stays neutral",error)}
  }
+ window.prepareAvatarAudio=prepareAudioGraph;
  audio.addEventListener("play",prepareAudioGraph);
  if(!audio.paused)prepareAudioGraph();
  const clock=new THREE.Clock();
@@ -196,6 +205,8 @@ try {
   }
   mouth+=(energy-mouth)*(energy>mouth?.55:.35);
   if(jaw)jaw.rotation.z=jawRest-mouth*.15;
+  const blink=Math.max(0,1-Math.abs((time%5)-4.8)/.12);
+  for(const lid of lids)lid.node.rotation.z=lid.rest+blink*.08;
   renderer.render(scene,camera);
   if(root&&!renderConfirmed&&now-lastProbe>250){
    lastProbe=now;
@@ -217,4 +228,4 @@ try {
  requestAnimationFrame(frame);
 }catch(error){notice.textContent="3D avatar renderer unavailable. Check browser console.";console.error("Avatar renderer failed",error)}
 </script>'''
-    return modules, script.replace("__MODEL__", json.dumps(source)).replace("__ERROR__", json.dumps(error))
+    return modules, script.replace("__MODEL__", json.dumps(source)).replace("__ERROR__", json.dumps(error)).replace("__HEAD__", str(config.AVATAR_HEAD_FRACTION)).replace("__WIDTH__", str(config.AVATAR_WIDTH_FRACTION)).replace("__HEIGHT__", str(config.AVATAR_HEIGHT_FRACTION))
