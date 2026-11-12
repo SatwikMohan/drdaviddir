@@ -20,7 +20,7 @@ async def generated(*args):
 def test_full_turn_and_deduplication():
     async def run():
         socket=Socket();session=Conversation(socket,asyncio.Semaphore(1));socket.session=session
-        with patch("services.conversation.api.transcribe",AsyncMock(return_value="What is a bucket wheel excavator?")) as stt,patch("services.conversation.retrieve",return_value="Evidence") as retrieval,patch("services.conversation.api.generate",side_effect=generated) as generation,patch("services.conversation.api.synthesize",AsyncMock(return_value=b"RIFF")) as tts:
+        with patch("services.conversation.api.transcribe",AsyncMock(return_value="What does your indexed paper say about a bucket wheel excavator?")) as stt,patch("services.conversation.retrieve",return_value="Evidence") as retrieval,patch("services.conversation.api.generate",side_effect=generated) as generation,patch("services.conversation.api.synthesize",AsyncMock(return_value=b"RIFF")) as tts:
             await session.start(message());await session.task
             assert socket.events[-1]["type"]=="done"
             assert stt.call_count==retrieval.call_count==generation.call_count==1
@@ -38,7 +38,7 @@ def test_missing_index_evidence_still_uses_model():
         socket=Socket();session=Conversation(socket,asyncio.Semaphore(1));socket.session=session
         with patch("services.conversation.api.transcribe",AsyncMock(return_value="What is coal?")),patch("services.conversation.retrieve",return_value="") as retrieval,patch("services.conversation.api.generate",side_effect=generated) as generation,patch("services.conversation.api.synthesize",AsyncMock(return_value=b"RIFF")):
             await session.start(message());await session.task
-            retrieval.assert_called_once()
+            retrieval.assert_not_called()
             generation.assert_called_once()
             assert socket.events[-1]["type"]=="done"
             assert session.history[-1]["content"]
@@ -79,7 +79,7 @@ def test_retrieval_failure_still_allows_general_answer():
         socket=Socket();session=Conversation(socket,asyncio.Semaphore(1));socket.session=session
         with patch("services.conversation.api.transcribe",AsyncMock(return_value="What is coal?")),patch("services.conversation.retrieve",side_effect=RuntimeError("broken index")) as retrieval,patch("services.conversation.api.generate",side_effect=generated) as generation,patch("services.conversation.api.synthesize",AsyncMock(return_value=b"RIFF")):
             await session.start(message());await session.task
-            retrieval.assert_called_once()
+            retrieval.assert_not_called()
             generation.assert_called_once()
             assert socket.events[-1]["type"]=="done"
 

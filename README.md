@@ -64,9 +64,12 @@ updates that source; use distinct filenames to retain historical editions.
 flowchart LR
   Mic[Microphone + local silence detection] --> WS[Session WebSocket / request ID]
   WS --> STT[OpenAI file transcription]
-  STT --> Emb[One OpenAI query embedding / cache]
+  STT --> Router[Rule-based intent router]
+  Router --> Emb[Optional OpenAI query embedding / cache]
+  Router --> Web[Optional Brave web search]
   Emb --> DB[Local Chroma + lexical search + version filter]
   DB --> Gate[Deterministic evidence gate]
+  Web --> LLM
   Gate --> LLM[One streamed OpenAI Responses request]
   LLM --> Buffer[Bounded sentence queue]
   Buffer --> TTS[OpenAI Speech API]
@@ -76,11 +79,14 @@ flowchart LR
   Mic -. immediate stop .-> Audio
 ```
 
-A normal turn uses **1 transcription + 0 or 1 embedding + 1 generation + N speech
+A normal turn uses **1 transcription + 0 or 1 embedding + 0 or 1 web search + 1 generation + N speech
 requests**, where N is the number of sentence groups. That is 3+N calls on a cache
-miss, 2+N on a cache hit. Insufficient evidence skips generation. No model query
-rewriting, classification, per-passage calls, semantic validation calls or web
-fallback is used. Requests stream into a bounded sentence queue. A single synthesis
+miss, 2+N on a cache hit. General conversation uses 0 embeddings and 0 web calls.
+Current information uses Brave search when `BRAVE_SEARCH_API_KEY` is set and
+`WEB_SEARCH_ENABLED` is true. Search failure or missing credentials are passed to
+the answer prompt as unavailable; the assistant must not invent current facts.
+No model query rewriting, classification, per-passage calls or semantic validation
+calls are used. Requests stream into a bounded sentence queue. A single synthesis
 worker feeds ordered audio with playback acknowledgements and bounded lookahead.
 WAV bytes stream from OpenAI into each segment; playback begins when that segment
 is complete, while later sentences are being synthesized.

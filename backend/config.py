@@ -10,7 +10,7 @@ API_HOST = "127.0.0.1"
 API_PORT = 8000
 API_LOG_LEVEL = "info"
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
-OPENAI_CHAT_MODEL = "gpt-5.4-mini"
+OPENAI_CHAT_MODEL = os.environ.get("OPENAI_CHAT_MODEL", "gpt-5.4-mini")
 OPENAI_EMBED_MODEL = "text-embedding-3-small"
 OPENAI_EMBED_DIMENSIONS = 1536
 OPENAI_STT_MODEL = "gpt-transcribe"
@@ -67,6 +67,15 @@ DIAGNOSTICS_ENABLED = True
 API_PRICING = {}
 BROWSER_ALLOWED_ORIGINS = ("http://localhost:8000", "http://127.0.0.1:8000")
 QA_TOP_K = 5
+PERSONA_DISCLOSURE = "You are speaking with an AI portrayal of Dr David Penman."
+PERSONA_FIRST_PERSON = True
+PERSONA_BRITISH_ENGLISH = True
+WEB_SEARCH_PROVIDER = os.environ.get("WEB_SEARCH_PROVIDER", "brave")
+WEB_SEARCH_API_KEY = os.environ.get("BRAVE_SEARCH_API_KEY", "")
+WEB_SEARCH_ENABLED = os.environ.get("WEB_SEARCH_ENABLED", "true").lower() == "true"
+WEB_SEARCH_RESULTS = 4
+WEB_SEARCH_TIMEOUT_SECONDS = 5
+RESPONSE_STREAMING = True
 # Indexing and retrieval. Changing embedding models requires running ingestion.
 CHROMA_COLLECTION_NAME = "texmin_qa"
 INGESTION_VERSION = 9

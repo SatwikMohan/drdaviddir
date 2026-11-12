@@ -35,7 +35,7 @@ def test_websocket_end_to_end_with_mocked_provider():
     from unittest.mock import AsyncMock
     async def answer(*args):
         yield "The indexed manual describes a bucket wheel excavator with rotating buckets."
-    with patch("services.conversation.api.transcribe",AsyncMock(return_value="What is a bucket wheel excavator?")) as stt,patch("services.conversation.retrieve",return_value="A bucket wheel excavator has rotating buckets.") as retrieval,patch("services.conversation.api.generate",side_effect=answer) as generation,patch("services.conversation.api.synthesize",AsyncMock(return_value=b"RIFF")) as tts,TestClient(app) as client:
+    with patch("services.conversation.api.transcribe",AsyncMock(return_value="What does your indexed paper say about a bucket wheel excavator?")) as stt,patch("services.conversation.retrieve",return_value="A bucket wheel excavator has rotating buckets.") as retrieval,patch("services.conversation.api.generate",side_effect=answer) as generation,patch("services.conversation.api.synthesize",AsyncMock(return_value=b"RIFF")) as tts,TestClient(app) as client:
         with client.websocket_connect("/voice",headers={"origin":"http://testserver"}) as ws:
             payload={"type":"utterance","request_id":"websocket-0001","audio":base64.b64encode(b"audio").decode(),"mime":"audio/wav"}
             ws.send_json(payload)

@@ -18,7 +18,7 @@ class Socket:
 
 def test_persona_has_identity_and_conversational_character():
     prompt = persona_prompt()
-    assert "You are Dr. David Penman" in prompt
+    assert "authorised AI portrayal of Dr. David Penman" in prompt
     assert "patient, observant mining educator" in prompt
     assert "Speak directly as yourself in the first person" in prompt
 
@@ -84,7 +84,7 @@ def test_general_question_with_empty_index_still_uses_model():
              patch("services.conversation.api.generate", side_effect=answer) as generate, \
              patch("services.conversation.api.synthesize", AsyncMock(return_value=b"RIFF")):
             await session.turn(b"audio", "audio/wav")
-        retrieve.assert_called_once()
+        retrieve.assert_not_called()
         generate.assert_called_once()
         assert "general knowledge" in generate.call_args.args[1]
         assert session.history[-1]["content"].startswith("Coal is")
