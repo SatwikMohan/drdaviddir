@@ -37,13 +37,29 @@ def _is_lfs_pointer(path: Path) -> bool:
         return source.read(128).startswith(b"version https://git-lfs.github.com/spec/v1")
 
 
+def resolve_avatar_model(configured_path: str) -> Path:
+    """Select a supported model, reporting when the configured asset is absent."""
+    requested = Path(configured_path)
+    if not requested.is_absolute():
+        requested = Path(__file__).resolve().parent / requested
+    if requested.suffix.lower() in {".glb", ".gltf"} and requested.is_file():
+        return requested
+    for candidate in (ASSETS / "dr-david-original.glb", ASSETS / "scene.gltf"):
+        if candidate.is_file():
+            LOG.warning("Configured avatar model %s is unavailable or unsupported; using %s", requested, candidate)
+            return candidate
+    raise FileNotFoundError(
+        f"No usable avatar model. Configured path: {requested}. "
+        "Place assets/dr-david-original.glb or assets/scene.gltf under frontend, "
+        "or set AVATAR_MODEL_PATH to an existing .glb/.gltf file."
+    )
+
+
 def avatar_asset_manifest(configured_path: str) -> tuple[Path, dict, list[Path]]:
     """Validate local model resources with exact case on Linux at build and run time."""
-    path = Path(configured_path)
-    if not path.is_absolute():
-        path = Path(__file__).resolve().parent / path
+    path = resolve_avatar_model(configured_path)
     if path.suffix.lower() not in {".glb", ".gltf"}:
-        raise ValueError("AVATAR_MODEL_FILE must point to a GLTF or GLB model")
+        raise ValueError("AVATAR_MODEL_PATH must point to a GLTF or GLB model")
     if not path.is_file() or path.stat().st_size == 0:
         raise FileNotFoundError(f"Avatar model missing or empty: {path}")
     _assert_exact_case(path, Path(__file__).resolve().parent if not Path(configured_path).is_absolute() else None)
@@ -97,6 +113,7 @@ def import_map() -> str:
     )
     return json.dumps({"imports": {
         "three": javascript_uri((ASSETS / "three.module.js").read_text(encoding="utf-8")),
+        "avatar/pose": javascript_uri((ASSETS / "avatar_pose.js").read_text(encoding="utf-8")),
         "three/GLTFLoader.js": javascript_uri(loader),
         "three/BufferGeometryUtils.js": javascript_uri(
             (ASSETS / "BufferGeometryUtils.js").read_text(encoding="utf-8")
@@ -107,17 +124,18 @@ def import_map() -> str:
 def render_script() -> tuple[str, str]:
     """Return import map and renderer script; audio playback remains in visualization."""
     try:
-        source = model_uri(config.AVATAR_MODEL_FILE)
+        source = model_uri(config.AVATAR_MODEL_PATH)
         modules = import_map()
         error = ""
     except (OSError, ValueError, json.JSONDecodeError) as exc:
         LOG.exception("Avatar asset preparation failed")
-        message = json.dumps("3D avatar unavailable. Check application logs.").replace("</", "<\\/")
+        message = json.dumps(f"3D avatar unavailable. {exc}").replace("</", "<\\/")
         return "{}", f'<script>document.getElementById("modelStatus").textContent={message};</script>'
     script = r'''
 <script type="module">
 import * as THREE from "three";
 import {GLTFLoader} from "three/GLTFLoader.js";
+import {applyAPose, disableInvalidMorphTargets} from "avatar/pose";
 const host=document.getElementById("avatarScene"),notice=document.getElementById("modelStatus");
 const stage=document.getElementById("visual"),audio=document.getElementById("audio");
 const modelUri=__MODEL__;
@@ -139,10 +157,10 @@ try {
  scene.add(new THREE.HemisphereLight(0xffffff,0x315442,3.2));
  const key=new THREE.DirectionalLight(0xffffff,2.8);key.position.set(2,3,4);scene.add(key);
  const rim=new THREE.DirectionalLight(0x65ffae,1.2);rim.position.set(-3,1,-3);scene.add(rim);
- let root=null,mixer=null,jaw=null,jawRest=0,head=null,headRest=0,baseY=0;
- const lids=[];
+ let root=null,baseY=0,playbackActive=false;
+ const mouthTargets=[];
  let loadedAt=0,lastProbe=0,renderConfirmed=false,renderFailureLogged=false;
- let center=new THREE.Vector3(),halfWidth=1,halfHeight=1,halfDepth=.3,context=null,analyser=null,samples=null,mouth=0;
+ let center=new THREE.Vector3(),halfWidth=1,halfHeight=1,halfDepth=.3,context=null,analyser=null,samples=null,mouth=0,speechPeak=.025;
  function resize(){
   const width=Math.max(1,host.clientWidth),height=Math.max(1,host.clientHeight);
   renderer.setSize(width,height,false);camera.aspect=width/height;
@@ -154,13 +172,18 @@ try {
  new ResizeObserver(resize).observe(host);
  new GLTFLoader().load(modelUri,gltf=>{
   root=gltf.scene;
+  disableInvalidMorphTargets(root);
+  if(__APOSE__){
+   const pose=applyAPose(root,__ARMANGLE__);
+   if(!pose.applied)console.warn("Avatar A-pose unavailable:",pose.reason);
+  }
   root.updateMatrixWorld(true);
   root.traverse(node=>{if(node.isSkinnedMesh)node.updateMatrixWorld(true)});
   root.traverse(node=>{
-   const name=(node.name||"").toLowerCase();
-   if(node.isBone&&name.includes("jaw")&&!name.includes("unused")&&!jaw){jaw=node;jawRest=node.rotation.z}
-   if(node.isBone&&/head neck upper/.test(name)&&!head){head=node;headRest=node.rotation.z}
-   if(node.isBone&&/eyelid.*upper middle/.test(name))lids.push({node,rest:node.rotation.z});
+   if(!node.isMesh||!node.morphTargetInfluences)return;
+   node.morphTargetInfluences.fill(0);
+   const index=node.morphTargetDictionary?.aa;
+   if(index!==undefined)mouthTargets.push({node,index});
   });
   const box=new THREE.Box3().setFromObject(root);
   if(box.isEmpty()){notice.textContent="3D avatar has no visible geometry";console.error("Avatar model has no visible geometry");return}
@@ -172,41 +195,54 @@ try {
   const fittedSize=fitted.getSize(new THREE.Vector3());
   center.y=fitted.max.y-fittedSize.y*__HEAD__;
   halfWidth=fittedSize.x*__WIDTH__;halfHeight=fittedSize.y*__HEIGHT__;halfDepth=fittedSize.z*.15;
-  if(gltf.animations.length){mixer=new THREE.AnimationMixer(root);mixer.clipAction(gltf.animations[0]).play()}
   resize();loadedAt=performance.now();
  },undefined,error=>{notice.textContent="3D avatar could not load. Check browser console.";console.error("Avatar GLTF load failed",error)});
  async function prepareAudioGraph(){
   try{
    if(!context){context=new AudioContext();analyser=context.createAnalyser();analyser.fftSize=1024;
-    samples=new Uint8Array(analyser.fftSize);
+    samples=new Float32Array(analyser.fftSize);
     const source=context.createMediaElementSource(audio);
     source.connect(analyser);analyser.connect(context.destination)}
    if(context.state==="suspended")await context.resume();
-  }catch(error){console.warn("Audio analysis unavailable; jaw stays neutral",error)}
+  }catch(error){console.warn("Audio analysis unavailable; mouth stays neutral",error)}
  }
+ function resetMouth(){
+  mouth=0;
+  for(const {node,index} of mouthTargets)node.morphTargetInfluences[index]=0;
+ }
+ function stopMouth(){playbackActive=false;speechPeak=.025;resetMouth()}
+ audio.addEventListener("playing",()=>{playbackActive=true});
+ for(const event of ["pause","ended","emptied","error","waiting","seeking","loadstart"])
+  audio.addEventListener(event,stopMouth);
+ document.addEventListener("visibilitychange",resetMouth);
  window.prepareAvatarAudio=prepareAudioGraph;
  audio.addEventListener("play",prepareAudioGraph);
  if(!audio.paused)prepareAudioGraph();
  const clock=new THREE.Clock();
  function frame(now){
   requestAnimationFrame(frame);const delta=clock.getDelta(),time=now/1000,state=stage.dataset.state;
-  if(mixer)mixer.update(delta);
   if(root){
-   const thinking=state==="retrieving"||state==="generating";
-   root.rotation.y=.5+Math.sin(time*(state==="listening"?1.1:.65))*.045+(thinking?Math.sin(time*1.1)*.04:0);
+   root.rotation.y=0;
    root.position.y=baseY+Math.sin(time*(state==="listening"?1.8:1.1))*.013;
-   if(head)head.rotation.z=headRest+(thinking?Math.sin(time*1.3)*.018:0);
   }
   let energy=0;
-  if(state==="speaking"&&analyser&&context?.state==="running"){
-   analyser.getByteTimeDomainData(samples);let sum=0;
-   for(const value of samples){const sample=(value-128)/128;sum+=sample*sample}
-   energy=Math.min(1,Math.max(0,(Math.sqrt(sum/samples.length)-.025)*7));
+  const speaking=playbackActive&&!audio.paused&&!audio.ended&&!audio.seeking&&
+   audio.readyState>=3&&!document.hidden&&analyser&&context?.state==="running";
+  if(speaking){
+   analyser.getFloatTimeDomainData(samples);let sum=0;
+   for(const sample of samples)sum+=sample*sample;
+   const rms=Math.sqrt(sum/samples.length);
+   // Normalize quiet TTS against its recent peak instead of discarding it at .025 RMS.
+   // A fixed floor prevents silence/background hiss from becoming a full mouth opening.
+   speechPeak=Math.max(.025,rms,speechPeak*Math.exp(-Math.min(delta,.1)*.7));
+   energy=rms<=.003?0:Math.sqrt(Math.min(1,(rms-.003)/(speechPeak-.003)));
   }
-  mouth+=(energy-mouth)*(energy>mouth?.55:.35);
-  if(jaw)jaw.rotation.z=jawRest-mouth*.15;
-  const blink=Math.max(0,1-Math.abs((time%5)-4.8)/.12);
-  for(const lid of lids)lid.node.rotation.z=lid.rest+blink*.08;
+  // Audio-reactive opening only: this does not infer phonemes.
+  if(!speaking)resetMouth();
+  else {
+   mouth+=(energy-mouth)*(1-Math.exp(-Math.min(delta,.1)*(energy>mouth?20:12)));
+   for(const {node,index} of mouthTargets)node.morphTargetInfluences[index]=mouth;
+  }
   renderer.render(scene,camera);
   if(root&&!renderConfirmed&&now-lastProbe>250){
    lastProbe=now;
@@ -228,4 +264,4 @@ try {
  requestAnimationFrame(frame);
 }catch(error){notice.textContent="3D avatar renderer unavailable. Check browser console.";console.error("Avatar renderer failed",error)}
 </script>'''
-    return modules, script.replace("__MODEL__", json.dumps(source)).replace("__ERROR__", json.dumps(error)).replace("__HEAD__", str(config.AVATAR_HEAD_FRACTION)).replace("__WIDTH__", str(config.AVATAR_WIDTH_FRACTION)).replace("__HEIGHT__", str(config.AVATAR_HEIGHT_FRACTION))
+    return modules, script.replace("__MODEL__", json.dumps(source)).replace("__ERROR__", json.dumps(error)).replace("__HEAD__", str(config.AVATAR_HEAD_FRACTION)).replace("__WIDTH__", str(config.AVATAR_WIDTH_FRACTION)).replace("__HEIGHT__", str(config.AVATAR_HEIGHT_FRACTION)).replace("__APOSE__", json.dumps(config.AVATAR_A_POSE)).replace("__ARMANGLE__", json.dumps(config.AVATAR_ARM_LOWERING_DEGREES))

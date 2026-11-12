@@ -75,12 +75,19 @@ def inspect(path):
         return [item.unpack_from(buffers[view["buffer"]], offset + n * stride) for n in range(a["count"])]
 
     meshes = []
+    validation_errors = []
     for mi, mesh in enumerate(model.get("meshes", [])):
         primitives = []
         for primitive in mesh["primitives"]:
             if "KHR_draco_mesh_compression" in primitive.get("extensions", {}):
                 raise ValueError("Draco primitives require a glTF decoder")
             positions = accessor(primitive["attributes"]["POSITION"])
+            for ti, target in enumerate(primitive.get("targets", [])):
+                for semantic, ai in target.items():
+                    count = model["accessors"][ai]["count"]
+                    if count != len(positions):
+                        validation_errors.append({"mesh": mi, "target": ti, "semantic": semantic,
+                                                  "expected_count": len(positions), "actual_count": count})
             indices = [i[0] for i in accessor(primitive["indices"])] if "indices" in primitive else list(range(len(positions)))
             if any(i >= len(positions) or i < 0 for i in indices):
                 raise ValueError("Index outside vertex array")
@@ -116,6 +123,7 @@ def inspect(path):
                        "target_names": mesh.get("extras", {}).get("targetNames", []),
                        "default_weights": mesh.get("weights", []), "primitives": primitives})
     return {"source": path.as_posix(), "files": files, "meshes": meshes,
+            "validation_errors": validation_errors,
             "nodes": model.get("nodes", []), "skins": model.get("skins", []),
             "animations": model.get("animations", []), "materials": model.get("materials", []),
             "textures": model.get("textures", []), "images": model.get("images", []),

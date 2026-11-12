@@ -22,9 +22,12 @@ def test_missing_credentials_readiness():
         assert client.get("/ready").status_code==503
 
 def test_assets_exact_case_and_rig():
+    from tools.inspect_facial_asset import inspect
     path, model, resources=avatar_asset_manifest(config.AVATAR_MODEL_FILE)
-    assert resources and not model.get("animations")
-    assert any("jaw" in n.get("name","").lower() for n in model["nodes"])
+    inventory = inspect(path)
+    assert inventory["skins"] and not inventory["animations"]
+    assert not inventory["validation_errors"]
+    assert "aa" in inventory["meshes"][0]["target_names"]
 
 
 def test_websocket_end_to_end_with_mocked_provider():

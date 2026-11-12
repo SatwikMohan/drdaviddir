@@ -1,5 +1,7 @@
 # Replacement model inspection — 3 November 2026
 
+> Superseded by the [10 November inspection and A-pose implementation](AVATAR_MODEL_NOV10.md). This report describes the previous model; its inventory is now `facial-asset-inventory-nov03.json`.
+
 The replacement glTF and its new buffer/texture were inspected successfully. It remains a static model: no facial shape keys, morph targets, skinning, skeleton, or animation clips were exported. The requested facial animation implementation is still gated on external facial preparation, per the original task's explicit stop condition.
 
 | Property | Previous asset | Replacement |

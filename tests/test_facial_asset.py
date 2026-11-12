@@ -13,12 +13,22 @@ ROOT = Path(__file__).resolve().parents[1]
 
 class FacialAssetTests(unittest.TestCase):
     def test_current_asset_matches_recorded_inventory(self):
-        result = inspect(ROOT / "frontend/assets/scene.gltf")
+        result = inspect(ROOT / "frontend/assets/dr-david-original.glb")
         recorded = json.loads((ROOT / "docs/facial-asset-inventory.json").read_text())
         self.assertEqual(result["files"], recorded["files"])
         self.assertEqual(result["meshes"], recorded["meshes"])
-        self.assertEqual(result["skins"], [])
-        self.assertEqual(result["meshes"][0]["primitives"][0]["morph_target_count"], 0)
+        self.assertEqual(result["skins"], recorded["skins"])
+        self.assertEqual(result["validation_errors"], recorded["validation_errors"])
+        self.assertEqual(result["validation_errors"], [])
+        self.assertEqual(result["meshes"][0]["target_names"],
+                         ['aa','ih','ee','oh','ou','blinkLeft','blinkRight','blink','happy','angry','surprised'])
+        self.assertEqual(result["meshes"][0]["primitives"][0]["vertices"], 28456)
+
+    def test_converted_gltf_is_still_preserved_and_identified_as_invalid(self):
+        result = inspect(ROOT / "frontend/assets/scene.gltf")
+        recorded = json.loads((ROOT / "docs/converted-gltf-inventory.json").read_text())
+        self.assertEqual(result["files"], recorded["files"])
+        self.assertEqual(len(result["validation_errors"]), 11)
 
     def test_glb_and_gltf_have_same_geometry_inventory(self):
         # Synthetic triangle checks container parsing, not facial deformation quality.
@@ -40,6 +50,14 @@ class FacialAssetTests(unittest.TestCase):
             model["buffers"][0]["uri"] = "buffer.bin"
             (folder / "model.gltf").write_text(json.dumps(model))
             self.assertEqual(result["meshes"], inspect(folder / "model.gltf")["meshes"])
+            self.assertEqual(result["validation_errors"], [])
+            model["accessors"].append(dict(model["accessors"][0], count=1))
+            model["meshes"][0]["primitives"][0]["targets"] = [{"POSITION": 1}]
+            (folder / "model.gltf").write_text(json.dumps(model))
+            invalid = inspect(folder / "model.gltf")["validation_errors"]
+            self.assertEqual(len(invalid), 1)
+            self.assertEqual(invalid[0]["expected_count"], 3)
+            self.assertEqual(invalid[0]["actual_count"], 1)
             (folder / "model.glb").write_bytes(glb[:-4])
             with self.assertRaisesRegex(ValueError, "header"):
                 inspect(folder / "model.glb")

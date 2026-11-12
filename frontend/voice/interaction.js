@@ -7,7 +7,7 @@ export function wavBuffer(chunks,rate){
 }
 export class InteractionManager{
  constructor(cfg){this.cfg=cfg;this.id=null;this.queue=[];this.state="idle";this.epoch=0;this.recording=false;this.playing=false;this.recoverable=false;this.preRoll=[];this.barge=0;this.frames=[];this.connect()}
- setState(state,message){this.state=state;stage.dataset.state=state;status.textContent=message||({idle:"Tap the microphone to begin",listening:"I'm listening... Pause when you have finished.",transcribing:"Listening to your words...",retrieving:"Considering your question...",generating:"A moment's thought...",speaking:"You may speak to interrupt",interrupted:"I'm listening...",error:"Please try again"}[state]||"");button.setAttribute("aria-label",this.recoverable?"Retry remaining speech":state==="speaking"?"Interrupt and speak":"Start speaking");button.disabled=state==="listening"}
+ setState(state,message){this.state=state;stage.dataset.state=state;status.textContent=message||({idle:"Tap the microphone to begin",listening:"I'm listening... Pause when you have finished.",processing:"Just a moment...",transcribing:"Just a moment...",retrieving:"Just a moment...",generating:"Just a moment...",speaking:"You may speak to interrupt",interrupted:"I'm listening...",error:"Please try again"}[state]||"");button.setAttribute("aria-label",this.recoverable?"Retry remaining speech":state==="speaking"?"Interrupt and speak":"Start speaking");button.disabled=state==="listening"}
  connect(){this.socket=new WebSocket(`${location.protocol==="https:"?"wss":"ws"}://${location.host}/voice`);this.socket.onopen=()=>{button.disabled=false;this.setState("idle")};this.socket.onmessage=e=>this.event(JSON.parse(e.data));this.socket.onclose=()=>this.fail("The connection closed. Tap the microphone to reconnect.");this.socket.onerror=()=>this.fail("Cannot connect to the conversation service.")}
  send(message){if(this.socket.readyState!==WebSocket.OPEN)throw Error("Connection unavailable");this.socket.send(JSON.stringify(message))}
  async prepare(){
@@ -49,13 +49,13 @@ export class InteractionManager{
  async submit(){
   if(!this.recording)return;this.recording=false;clearTimeout(this.recordTimer);
   if(this.speechMs<this.cfg.minSpeechMs){this.frames=[];this.setState("idle","I didn't catch any speech. Tap to try again.");return}
-  const epoch=this.epoch, blob=new Blob([wavBuffer(this.frames,this.context.sampleRate)],{type:"audio/wav"});this.frames=[];this.setState("transcribing");this.watchdog();
+  const epoch=this.epoch, blob=new Blob([wavBuffer(this.frames,this.context.sampleRate)],{type:"audio/wav"});this.frames=[];this.setState("processing");this.watchdog();
   try{const encoded=await new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result.split(",")[1]);reader.onerror=reject;reader.readAsDataURL(blob)});if(epoch!==this.epoch)return;this.send({type:"utterance",request_id:this.id,audio:encoded,mime:"audio/wav"})}catch{this.fail("Your recording could not be sent. Please try again.")}
  }
  watchdog(){clearTimeout(this.timer);this.timer=setTimeout(()=>{try{this.send({type:"cancel",request_id:this.id})}catch{}this.fail("The conversation timed out. Please try again.")},this.cfg.turnTimeoutMs+5000)}
  event(message){
   if(message.request_id!==this.id)return;
-  if(message.type==="state"){if(!this.playing)this.setState(message.state)}
+  if(message.type==="state"){if(!this.playing)this.setState(["transcribing","retrieving","generating"].includes(message.state)?"processing":message.state)}
   else if(message.type==="audio"){
    if(message.sequence!==this.nextSequence||this.queue.length>=this.cfg.queueLimit){this.fail("Audio arrived out of order. Please try again.");return}
    this.nextSequence++;this.queue.push(message);this.playNext();

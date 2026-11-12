@@ -1,5 +1,7 @@
 # Facial animation assessment — 3 November 2026
 
+> Latest results: [10 November model inspection and A-pose](AVATAR_MODEL_NOV10.md). The current asset now has a body skeleton and malformed morph targets; the findings below are historical.
+
 > **Replacement model inspected later on 3 November:** see [updated assessment](FACIAL_ANIMATION_REASSESSMENT.md). The counts and screenshot below describe the previous asset. Its inventory is retained as `facial-asset-inventory-original.json`; `facial-asset-inventory.json` now describes the replacement. The replacement also has zero morph targets and no skeleton.
 
 **Implementation gate: external geometry preparation is required.** The active character has zero morph targets and no skeleton. No facial animation engine, synthetic mouth, substitute face, or generated deformations have been introduced. This follows the task's explicit instruction to stop when the geometry cannot support the requested result. The original model and application code are unchanged.

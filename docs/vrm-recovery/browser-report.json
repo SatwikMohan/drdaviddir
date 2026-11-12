@@ -1,0 +1,44 @@
+{
+  "invalid": [],
+  "applied": true,
+  "meshes": [
+    {
+      "name": "output_unwrapped",
+      "targets": {
+        "aa": 0,
+        "ih": 1,
+        "ee": 2,
+        "oh": 3,
+        "ou": 4,
+        "blinkLeft": 5,
+        "blinkRight": 6,
+        "blink": 7,
+        "happy": 8,
+        "angry": 9,
+        "surprised": 10
+      },
+      "vertices": 28456,
+      "counts": [
+        28456,
+        28456,
+        28456,
+        28456,
+        28456,
+        28456,
+        28456,
+        28456,
+        28456,
+        28456,
+        28456
+      ]
+    }
+  ],
+  "errors": [],
+  "levels_tested": [
+    0,
+    0.25,
+    0.5,
+    0.75,
+    1
+  ]
+}

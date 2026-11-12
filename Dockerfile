@@ -6,6 +6,6 @@ COPY backend/requirements.txt /tmp/requirements.txt
 RUN pip install --no-cache-dir -r /tmp/requirements.txt
 COPY backend /app/backend
 COPY frontend /app/frontend
-RUN PYTHONPATH=/app/backend:/app/frontend python -c "import config; from avatar_renderer import avatar_asset_manifest; avatar_asset_manifest(config.AVATAR_MODEL_FILE)"
+RUN PYTHONPATH=/app/backend:/app/frontend python -c "import config; from avatar_renderer import avatar_asset_manifest; avatar_asset_manifest(config.AVATAR_MODEL_PATH)"
 EXPOSE 8000
 CMD ["uvicorn", "main:app", "--app-dir", "backend", "--host", "0.0.0.0", "--port", "8000", "--workers", "1", "--ws-max-size", "15000000"]
