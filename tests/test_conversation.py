@@ -2,7 +2,7 @@ import asyncio
 import base64
 from unittest.mock import AsyncMock, patch
 import config
-from services.conversation import Conversation, ABSTENTION
+from services.conversation import Conversation
 
 class Socket:
     def __init__(self): self.events=[];self.session=None
@@ -33,13 +33,16 @@ def test_full_turn_and_deduplication():
             other=Conversation(Socket(),asyncio.Semaphore(1));assert other.history==[]
     asyncio.run(run())
 
-def test_missing_evidence_abstains_without_llm():
+def test_missing_index_evidence_still_uses_model():
     async def run():
         socket=Socket();session=Conversation(socket,asyncio.Semaphore(1));socket.session=session
-        with patch("services.conversation.api.transcribe",AsyncMock(return_value="What is the unknown salary?")),patch("services.conversation.retrieve",return_value=""),patch("services.conversation.api.generate") as generation,patch("services.conversation.api.synthesize",AsyncMock(return_value=b"RIFF")):
+        with patch("services.conversation.api.transcribe",AsyncMock(return_value="What is coal?")),patch("services.conversation.retrieve",return_value="") as retrieval,patch("services.conversation.api.generate",side_effect=generated) as generation,patch("services.conversation.api.synthesize",AsyncMock(return_value=b"RIFF")):
             await session.start(message());await session.task
-            generation.assert_not_called()
-            assert session.history[-1]["content"]==ABSTENTION
+            retrieval.assert_called_once()
+            generation.assert_called_once()
+            assert socket.events[-1]["type"]=="done"
+            assert session.history[-1]["content"]
+
     asyncio.run(run())
 
 def test_interrupt_cancels_inflight_and_fences_old_turn():
@@ -71,14 +74,16 @@ def test_tts_failure_recovers_without_regeneration():
             assert socket.events[-1]["type"]=="done" and generation.call_count==1
     asyncio.run(run())
 
-def test_retrieval_failure_does_not_generate():
+def test_retrieval_failure_still_allows_general_answer():
     async def run():
         socket=Socket();session=Conversation(socket,asyncio.Semaphore(1));socket.session=session
-        with patch("services.conversation.api.transcribe",AsyncMock(return_value="Hello")),patch("services.conversation.retrieve",side_effect=RuntimeError("broken index")),patch("services.conversation.api.generate") as gen:
+        with patch("services.conversation.api.transcribe",AsyncMock(return_value="What is coal?")),patch("services.conversation.retrieve",side_effect=RuntimeError("broken index")) as retrieval,patch("services.conversation.api.generate",side_effect=generated) as generation,patch("services.conversation.api.synthesize",AsyncMock(return_value=b"RIFF")):
             await session.start(message());await session.task
-            assert socket.events[-1]["type"]=="error";gen.assert_not_called()
-    asyncio.run(run())
+            retrieval.assert_called_once()
+            generation.assert_called_once()
+            assert socket.events[-1]["type"]=="done"
 
+    asyncio.run(run())
 
 def test_bounded_audio_lookahead():
     async def run():
