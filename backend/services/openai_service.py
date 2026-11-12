@@ -103,7 +103,7 @@ async def synthesize(text):
         # One request per complete group; binary chunks are assembled into one playable WAV.
         async with async_client().audio.speech.with_streaming_response.create(
             model=config.OPENAI_TTS_MODEL, voice=config.OPENAI_TTS_VOICE, input=text,
-            instructions=config.OPENAI_TTS_INSTRUCTIONS, response_format="wav") as response:
+            instructions=config.OPENAI_TTS_INSTRUCTIONS, speed=config.OPENAI_TTS_SPEED, response_format="wav") as response:
             chunks = []
             async for chunk in response.iter_bytes():
                 chunks.append(chunk)

@@ -65,7 +65,7 @@ def ready():
         if not config.OPENAI_API_KEY:
             raise RuntimeError("Missing credentials")
         active_store()
-        avatar_asset_manifest(config.AVATAR_MODEL_FILE)
+        avatar_asset_manifest(config.AVATAR_MODEL_PATH)
         return {"status":"ready", "provider_check":"not performed"}
     except Exception:
         return JSONResponse({"status":"not_ready", "message":"Configure credentials, assets and a compatible index."}, status_code=503)

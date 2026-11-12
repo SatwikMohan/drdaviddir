@@ -13,7 +13,7 @@ from services.speech_chunker import IncrementalSpeechSegments
 
 log = logging.getLogger("panman.turn")
 SOCIAL = re.compile(r"^(hello|hi|hey|good (morning|evening|afternoon)|thank you|thanks|who are you|what is your name|how are you)[.!? ]*$", re.I)
-ABSTENTION = "I'm afraid I haven't enough information in my indexed documents to answer that reliably. Could you tell me which document or subject you have in mind?"
+ABSTENTION = "I don't have enough information to answer that reliably. Could you tell me a little more about what you mean?"
 
 class Conversation:
     def __init__(self, socket, capacity):
@@ -111,7 +111,7 @@ class Conversation:
                         context = await asyncio.to_thread(retrieve, question, self.history)
                     except Exception as exc:
                         log.warning("Retrieval failed request_id=%s category=%s", self.current, type(exc).__name__)
-                        await self.send("error", message="My indexed documents are unavailable. Please ask the operator to check or migrate the knowledge index.")
+                        await self.send("error", message="I'm having trouble finding the information I need right now. Please try again shortly.")
                         return
                     queue = asyncio.Queue(config.AUDIO_QUEUE_LIMIT)
                     worker = asyncio.create_task(self.audio_worker(queue))
