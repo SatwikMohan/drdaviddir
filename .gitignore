@@ -7,6 +7,7 @@ vector_db/
 __pycache__/
 *.pyc
 *.log
+backend/conversation_memory.sqlite3*
 raw_data_files/
 /assets/
 backend/evals/voice_samples/

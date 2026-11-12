@@ -15,7 +15,7 @@ OPENAI_EMBED_MODEL = "text-embedding-3-small"
 OPENAI_EMBED_DIMENSIONS = 1536
 OPENAI_STT_MODEL = "gpt-transcribe"
 OPENAI_TTS_MODEL = os.environ.get("OPENAI_TTS_MODEL", "gpt-4o-mini-tts")
-OPENAI_TTS_VOICE = os.environ.get("OPENAI_TTS_VOICE", "onyx")
+OPENAI_TTS_VOICE = os.environ.get("OPENAI_TTS_VOICE", "echo")
 OPENAI_TTS_INSTRUCTIONS = os.environ.get("OPENAI_TTS_INSTRUCTIONS", (
     "Speak English throughout with a strong, authentic British accent: educated Southern British "
     "pronunciation, clear non-rhotic vowels, and natural British stress and intonation. "
@@ -25,7 +25,7 @@ OPENAI_TTS_INSTRUCTIONS = os.environ.get("OPENAI_TTS_INSTRUCTIONS", (
     "the first word to the last. Avoid youthful brightness, American vowels, theatrical "
     "acting, forced depth, or exaggerated old-fashioned diction."
 ))
-OPENAI_TTS_SPEED = float(os.environ.get("OPENAI_TTS_SPEED", "1.0"))
+OPENAI_TTS_SPEED = float(os.environ.get("OPENAI_TTS_SPEED", "0.9"))
 OPENAI_TIMEOUT_SECONDS = 45
 OPENAI_MAX_RETRIES = 0
 OPENAI_MAX_CONCURRENT = 4
@@ -70,11 +70,8 @@ QA_TOP_K = 5
 PERSONA_DISCLOSURE = "You are speaking with an AI portrayal of Dr David Penman."
 PERSONA_FIRST_PERSON = True
 PERSONA_BRITISH_ENGLISH = True
-WEB_SEARCH_PROVIDER = os.environ.get("WEB_SEARCH_PROVIDER", "brave")
-WEB_SEARCH_API_KEY = os.environ.get("BRAVE_SEARCH_API_KEY", "")
-WEB_SEARCH_ENABLED = os.environ.get("WEB_SEARCH_ENABLED", "true").lower() == "true"
-WEB_SEARCH_RESULTS = 4
-WEB_SEARCH_TIMEOUT_SECONDS = 5
+MEMORY_DB_FILE = os.environ.get("PANMAN_MEMORY_DB_FILE", str(DATA_ROOT / "conversation_memory.sqlite3"))
+MEMORY_RETRIEVAL_LIMIT = 5
 RESPONSE_STREAMING = True
 # Indexing and retrieval. Changing embedding models requires running ingestion.
 CHROMA_COLLECTION_NAME = "texmin_qa"

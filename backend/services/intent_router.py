@@ -1,33 +1,43 @@
-"""Cheap deterministic routing for the voice conversation."""
+"""Local, zero-cost routing with recent-subject continuity."""
 import re
 from dataclasses import dataclass
 
 
 @dataclass(frozen=True)
 class Route:
-    local: bool = False
-    web: bool = False
-    personal: bool = False
+    category: str = "DIRECT_CONVERSATION"
+
+    @property
+    def local(self):
+        return self.category in {"PERSONAL_MEMORY", "LOCAL_KNOWLEDGE", "HYBRID_KNOWLEDGE"}
+
+    @property
+    def personal(self):
+        return self.category == "PERSONAL_MEMORY"
 
 
-PERSONAL = re.compile(r"\b(?:your|you|penman)\b.*\b(?:research|thesis|publication|paper|career|background|education|academic|work|achievement|interest|history|life|lecture|journey|school|role)\b|\b(?:research|thesis|publication|paper|career|background|education|academic|work|achievement|interest|history|life|lecture|journey|school|role)\b.*\b(?:your|you|penman)\b", re.I)
-CURRENT = re.compile(r"\b(?:latest|recent|currently|today|this (?:year|month|week)|nowadays|new developments?|up.to.date|breaking|202[5-9]|203\d)\b", re.I)
-LOCAL = re.compile(r"\b(?:my uploaded|the uploaded|your (?:paper|publication|thesis|research)|indexed|in the (?:document|paper|lecture)|iit\s*\(?ism\)?|indian school of mines|dhanbad|our (?:paper|research|document))\b", re.I)
-IDENTITY = re.compile(r"^(?:who are you|what is your name|are you (?:dr\.? )?(?:david )?penman)[?.! ]*$", re.I)
+PERSONAL = re.compile(r"\b(?:your|you|penman)\b.{0,75}\b(?:thesis|publication|paper|career|background|academic interests|achievements|history|life|research|professional experience|education|journey)\b|\b(?:thesis|publication|paper|career|background|academic interests|achievements|history|life|research|professional experience|education|journey)\b.{0,75}\b(?:your|you|penman)\b", re.I)
+LOCAL = re.compile(r"\b(?:uploaded|indexed|stored notes?|private knowledge|the document|the paper|my research|our research|my thesis|your thesis|your publications?|iit\s*\(?ism\)?|indian school of mines|dhanbad)\b", re.I)
+CURRENT = re.compile(r"\b(?:today|yesterday|right now|this (?:morning|week|month)|currently|current (?:market )?(?:price|rate|score|news)|latest (?:\w+ ){0,2}(?:news|release|papers?|research|developments?|model)|breaking news|live (?:price|updates?))\b", re.I)
+HYBRID = re.compile(r"\b(?:compare|contrast|relate|versus|vs\.?|against|how does|how do|in light of)\b", re.I)
+FOLLOW_UP = re.compile(r"\b(?:it|that|those|them|this|more|earlier|previous|discussed)\b", re.I)
+OPINION = re.compile(r"^(?:what do you think|how do you feel|why do you think)\b", re.I)
 
 
 def route(question: str, history=None) -> Route:
     q = question.strip()
-    if IDENTITY.fullmatch(q):
+    if re.fullmatch(r"(?:how are you(?: today)?|good (?:morning|afternoon|evening)|hello|hi)[?.! ]*", q, re.I):
         return Route()
-    if re.match(r"^(?:what do you think|how do you feel|can we discuss|why do you think)\b", q, re.I) and not CURRENT.search(q) and not LOCAL.search(q):
-        return Route()
-    personal = bool(PERSONAL.search(q))
-    local = personal or bool(LOCAL.search(q))
-    web = bool(CURRENT.search(q))
-    # Pronouns in follow-ups inherit the previous user's subject, without another model call.
-    if history and re.search(r"\b(?:it|that|those|them|this|more)\b", q, re.I):
+    if CURRENT.search(q):
+        return Route("CURRENT_INFORMATION_UNAVAILABLE")
+    personal = bool(PERSONAL.search(q)) and not bool(OPINION.search(q))
+    local = bool(LOCAL.search(q)) or personal
+    if history and FOLLOW_UP.search(q) and not local:
         previous = next((m["content"] for m in reversed(history) if m["role"] == "user"), "")
-        personal = personal or bool(PERSONAL.search(previous))
-        local = local or personal or bool(LOCAL.search(previous))
-    return Route(local=local, web=web, personal=personal)
+        previous_route = route(previous)
+        local, personal = previous_route.local, previous_route.personal
+    if local:
+        if HYBRID.search(q) and not personal:
+            return Route("HYBRID_KNOWLEDGE")
+        return Route("PERSONAL_MEMORY" if personal else "LOCAL_KNOWLEDGE")
+    return Route()
