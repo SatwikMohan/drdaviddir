@@ -7,12 +7,15 @@ import re
 from collections import deque
 import config
 from services import openai_service as api
-from services.persona import persona_prompt, GROUNDING
+from services.persona import persona_prompt, GROUNDING, PERSONA_FACTS
 from services.retrieval import retrieve
 from services.speech_chunker import IncrementalSpeechSegments
 
 log = logging.getLogger("panman.turn")
 SOCIAL = re.compile(r"^(hello|hi|hey|good (morning|evening|afternoon)|thank you|thanks|who are you|what is your name|how are you)[.!? ]*$", re.I)
+IDENTITY_QUESTION = re.compile(r"^(who are you|what is your name|tell me about yourself|who (?:is|was) (dr\.? )?david penman|who (?:is|was) dr\.? penman|are you (dr\.? )?(david )?penman)[?.! ]*$", re.I)
+BIOGRAPHY_QUESTION = re.compile(r"(?i)(?=.*\b(?:you|your|penman)\b)(?=.*\b(?:background|career|research|life|work|principal|director|role|thesis|school|achievements|history|identity|about|name)\b)")
+IDENTITY_ANSWER = f"I am {config.ASSISTANT_NAME}. I was the first founder-principal of the Indian School of Mines at Dhanbad, now IIT (ISM) Dhanbad."
 ABSTENTION = "I don't have enough information to answer that reliably. Could you tell me a little more about what you mean?"
 
 class Conversation:
@@ -108,7 +111,7 @@ class Conversation:
                     await self.send("state", state="retrieving")
                     # Exactly one normalized transcript vector. No query rewriting calls.
                     try:
-                        context = await asyncio.to_thread(retrieve, question, self.history)
+                        context = "" if (IDENTITY_QUESTION.fullmatch(question.strip()) or BIOGRAPHY_QUESTION.search(question)) else await asyncio.to_thread(retrieve, question, self.history)
                     except Exception as exc:
                         log.warning("Retrieval failed request_id=%s category=%s", self.current, type(exc).__name__)
                         await self.send("error", message="I'm having trouble finding the information I need right now. Please try again shortly.")
@@ -117,12 +120,15 @@ class Conversation:
                     worker = asyncio.create_task(self.audio_worker(queue))
                     answer = ""
                     await self.send("state", state="generating")
-                    if not context and not SOCIAL.fullmatch(question):
+                    if IDENTITY_QUESTION.fullmatch(question.strip()):
+                        answer = IDENTITY_ANSWER
+                        await queue.put(answer)
+                    elif not context and not SOCIAL.fullmatch(question) and not BIOGRAPHY_QUESTION.search(question):
                         answer = ABSTENTION
                         await queue.put(answer)
                     else:
                         messages = self.history + [{"role":"user", "content":question}]
-                        instructions = persona_prompt()+"\n"+GROUNDING+"\nIndexed evidence:\n"+(context or "No factual evidence.")
+                        instructions = persona_prompt()+"\n"+PERSONA_FACTS+"\n"+GROUNDING+"\nIndexed evidence:\n"+(context or "No factual evidence.")
                         splitter = IncrementalSpeechSegments()
                         async for delta in api.generate(messages, instructions):
                             answer += delta
