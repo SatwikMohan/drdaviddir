@@ -100,6 +100,10 @@ async def voice(socket: WebSocket):
                 await session.cancel()
             elif kind == "played":
                 session.acknowledge(message)
+            elif kind == "audible" and message.get("request_id") == session.current:
+                elapsed = message.get("latency_ms")
+                if isinstance(elapsed, (int, float)) and 0 <= elapsed <= config.TURN_TIMEOUT_SECONDS * 1000:
+                    logging.getLogger("panman.turn").info("stage request_id=%s name=submit_to_first_audible latency_ms=%.1f", session.current, elapsed)
             elif kind == "recover" and message.get("request_id") == session.current:
                 await session.recover()
     except (WebSocketDisconnect, TimeoutError):

@@ -64,6 +64,9 @@ class Conversation:
         if not data or len(data) > config.MAX_AUDIO_BYTES:
             raise ValueError("Empty or oversized recording")
         await self.cancel()
+        capture_ms = message.get("capture_ms")
+        if isinstance(capture_ms, (int, float)) and 0 <= capture_ms <= config.RECORDING_MAX_MS + 1000:
+            log.info("stage request_id=%s name=audio_capture latency_ms=%.1f", rid, capture_ms)
         self.seen.add(rid)
         self.current = rid
         self.task = asyncio.create_task(self.turn(data, message.get("mime", "")))
@@ -89,7 +92,9 @@ class Conversation:
                 if len(pending) >= config.AUDIO_QUEUE_LIMIT:
                     old = pending.popleft()
                     await asyncio.wait_for(old.wait(), config.AUDIO_ACK_TIMEOUT_SECONDS)
+                started = time.monotonic()
                 data = await api.synthesize(text)
+                log.info("stage request_id=%s name=tts_chunk sequence=%s latency_ms=%.1f", self.current, sequence, (time.monotonic()-started)*1000)
                 event = asyncio.Event()
                 self.acks[sequence] = event
                 pending.append(event)
@@ -119,39 +124,47 @@ class Conversation:
     async def turn(self, data, mime):
         token = api.request_id.set(self.current)
         worker = None
+        turn_started = time.monotonic()
         try:
             async with asyncio.timeout(config.TURN_TIMEOUT_SECONDS):
                 async with self.capacity:
                     await self.send("state", state="transcribing")
+                    stage_started = time.monotonic()
                     question = await api.transcribe(data, mime)
+                    log.info("stage request_id=%s name=stt latency_ms=%.1f", self.current, (time.monotonic()-stage_started)*1000)
                     if not question:
                         await self.send("error", message="I didn't catch any speech. Please try again.")
                         return
                     routed_at = time.monotonic()
                     decision = route(question, self.history)
                     log.info("route request_id=%s category=%s latency_ms=%.1f", self.current, decision.category, (time.monotonic()-routed_at)*1000)
-                    if detect_language(question) != "en":
+                    language_started = time.monotonic()
+                    language = detect_language(question)
+                    log.info("stage request_id=%s name=language latency_ms=%.1f", self.current, (time.monotonic()-language_started)*1000)
+                    if language != "en":
                         await self.speak_notice("I'm afraid I can only converse in English. Would you mind repeating that in English?")
                         return
                     if decision.category == "CURRENT_INFORMATION_UNAVAILABLE":
                         await self.speak_notice("I don't have access to live information in this version, so I can't verify that. I can discuss the background if you like.")
                         return
-                    context = ""
-                    retrieval_failed = False
+                    async def measured(name, function, *args, **kwargs):
+                        started = time.monotonic()
+                        try:
+                            return await asyncio.to_thread(function, *args, **kwargs)
+                        finally:
+                            log.info("stage request_id=%s name=%s latency_ms=%.1f", self.current, name, (time.monotonic()-started)*1000)
                     if decision.local:
                         await self.send("state", state="retrieving")
-                        try:
-                            started = time.monotonic()
-                            context = await asyncio.to_thread(retrieve, question, self.history)
-                            log.info("retrieval request_id=%s latency_ms=%.1f evidence=%s", self.current, (time.monotonic()-started)*1000, bool(context))
-                        except Exception as exc:
-                            retrieval_failed = True
-                            log.warning("Retrieval failed request_id=%s category=%s", self.current, type(exc).__name__)
-                    try:
-                        learned = await asyncio.to_thread(memory.relevant, question, user_id=self.user_id) if self.user_id else ""
-                    except Exception as exc:
-                        learned = ""
-                        log.warning("Memory retrieval failed request_id=%s category=%s", self.current, type(exc).__name__)
+                    retrieval_task = measured("local_retrieval", retrieve, question, self.history) if decision.local else asyncio.sleep(0, result="")
+                    memory_task = measured("memory_retrieval", memory.relevant, question, user_id=self.user_id) if self.user_id else asyncio.sleep(0, result="")
+                    context_result, learned_result = await asyncio.gather(retrieval_task, memory_task, return_exceptions=True)
+                    retrieval_failed = isinstance(context_result, Exception)
+                    if retrieval_failed:
+                        log.warning("Retrieval failed request_id=%s category=%s", self.current, type(context_result).__name__)
+                    if isinstance(learned_result, Exception):
+                        log.warning("Memory retrieval failed request_id=%s category=%s", self.current, type(learned_result).__name__)
+                    context = "" if retrieval_failed else context_result
+                    learned = "" if isinstance(learned_result, Exception) else learned_result
                     queue = asyncio.Queue(config.AUDIO_QUEUE_LIMIT)
                     worker = asyncio.create_task(self.audio_worker(queue))
                     answer = ""
@@ -166,17 +179,27 @@ class Conversation:
                         "Do not speak URLs, citations, retrieval labels or tool details. "
                         f"Local retrieval failed: {retrieval_failed}.")
                     splitter = IncrementalSpeechSegments()
+                    generation_started = time.monotonic()
+                    first_token = False
                     async for delta in api.generate(messages, instructions):
+                        if not first_token:
+                            log.info("stage request_id=%s name=llm_first_token latency_ms=%.1f", self.current, (time.monotonic()-generation_started)*1000)
+                            first_token = True
                         answer += delta
                         for sentence in splitter.push(delta):
                             await queue.put(sentence)
+                        for sentence in splitter.flush_due():
+                            await queue.put(sentence)
+                    log.info("stage request_id=%s name=llm_total latency_ms=%.1f", self.current, (time.monotonic()-generation_started)*1000)
                     for sentence in splitter.finish():
                         await queue.put(sentence)
                     # Preserve full text even if speech fails; never regenerate to recover speech.
                     self.history.extend([{"role":"user", "content":question}, {"role":"assistant", "content":answer}])
                     try:
                         if self.user_id:
+                            started = time.monotonic()
                             await asyncio.to_thread(memory.save, question, self.current, self.user_id)
+                            log.info("stage request_id=%s name=memory_update latency_ms=%.1f", self.current, (time.monotonic()-started)*1000)
                     except Exception as exc:
                         log.warning("Memory update failed request_id=%s category=%s", self.current, type(exc).__name__)
                     while len(self.history)>config.SESSION_MAX_TURNS*2 or (len(self.history)>2 and sum(len(x["content"]) for x in self.history)>config.SESSION_MAX_CHARS):
@@ -187,6 +210,7 @@ class Conversation:
                         await self.send("error", recoverable=True, message="Speech was interrupted. Tap the microphone to retry the remaining speech.")
                     else:
                         await self.send("done")
+                    log.info("stage request_id=%s name=turn_total latency_ms=%.1f", self.current, (time.monotonic()-turn_started)*1000)
         except asyncio.CancelledError:
             raise
         except Exception as exc:

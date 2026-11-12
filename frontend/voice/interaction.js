@@ -42,15 +42,15 @@ export class InteractionManager{
    if(this.speechMs>=this.cfg.minSpeechMs&&now-this.lastSpeech>=this.cfg.silenceMs)this.submit();
   }else{
    this.preRoll.push(frame);while(this.preRoll.length>Math.ceil(this.context.sampleRate*this.cfg.preRollMs/1000/frame.length))this.preRoll.shift();
-   if(this.state==="speaking"){this.barge=rms>this.cfg.bargeThreshold?this.barge+ms:0;if(this.barge>=this.cfg.bargeMs){this.begin();this.speechMs=this.cfg.bargeMs}}
+   if(["speaking","processing"].includes(this.state)){this.barge=rms>this.cfg.bargeThreshold?this.barge+ms:0;if(this.barge>=this.cfg.bargeMs){this.begin();this.speechMs=this.cfg.bargeMs}}
    else this.barge=0;
   }
  }
  async submit(){
   if(!this.recording)return;this.recording=false;clearTimeout(this.recordTimer);
   if(this.speechMs<this.cfg.minSpeechMs){this.frames=[];this.setState("idle","I didn't catch any speech. Tap to try again.");return}
-  const epoch=this.epoch, blob=new Blob([wavBuffer(this.frames,this.context.sampleRate)],{type:"audio/wav"});this.frames=[];this.setState("processing");this.watchdog();
-  try{const encoded=await new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result.split(",")[1]);reader.onerror=reject;reader.readAsDataURL(blob)});if(epoch!==this.epoch)return;this.send({type:"utterance",request_id:this.id,user_id:this.userId,audio:encoded,mime:"audio/wav"})}catch{this.fail("Your recording could not be sent. Please try again.")}
+  const epoch=this.epoch, captureMs=Math.round(performance.now()-this.started), blob=new Blob([wavBuffer(this.frames,this.context.sampleRate)],{type:"audio/wav"});this.frames=[];this.setState("processing");this.watchdog();
+  try{const encoded=await new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result.split(",")[1]);reader.onerror=reject;reader.readAsDataURL(blob)});if(epoch!==this.epoch)return;this.sentAt=performance.now();this.send({type:"utterance",request_id:this.id,user_id:this.userId,capture_ms:captureMs,audio:encoded,mime:"audio/wav"})}catch{this.fail("Your recording could not be sent. Please try again.")}
  }
  watchdog(){clearTimeout(this.timer);this.timer=setTimeout(()=>{try{this.send({type:"cancel",request_id:this.id})}catch{}this.fail("The conversation timed out. Please try again.")},this.cfg.turnTimeoutMs+5000)}
  event(message){
@@ -69,7 +69,7 @@ export class InteractionManager{
    const bytes=Uint8Array.from(atob(segment.audio),c=>c.charCodeAt(0));this.url=URL.createObjectURL(new Blob([bytes],{type:segment.mime}));audio.src=this.url;
    audio.onended=()=>{if(epoch!==this.epoch)return;this.send({type:"played",request_id:this.id,sequence:segment.sequence});URL.revokeObjectURL(this.url);this.url=null;this.playing=false;this.currentAudio=null;this.playNext();this.finish()};
    audio.onerror=()=>{if(epoch===this.epoch)this.fail("Audio playback failed. Tap the microphone to speak again.")};
-   await audio.play();if(epoch===this.epoch)this.setState("speaking");
+   await audio.play();if(epoch===this.epoch){if(segment.sequence===0)this.send({type:"audible",request_id:this.id,latency_ms:Math.round(performance.now()-this.sentAt)});this.setState("speaking")}
   }catch{if(epoch===this.epoch)this.fail("Audio playback is blocked. Tap the microphone and try again.")}
  }
  finish(){if(this.done&&!this.playing&&!this.queue.length){clearTimeout(this.timer);this.setState("idle")}}

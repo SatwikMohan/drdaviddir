@@ -80,7 +80,7 @@ async def transcribe(data, mime):
     with usage("transcription", config.OPENAI_STT_MODEL) as record:
         record["audio_input_bytes"] = len(data)
         response = await async_client().audio.transcriptions.create(
-            model=config.OPENAI_STT_MODEL, file=("utterance."+suffix, data, mime))
+            model=config.OPENAI_STT_MODEL, file=("utterance."+suffix, data, mime), language="en")
         record_usage(record, response)
         return " ".join(response.text.split())
 
