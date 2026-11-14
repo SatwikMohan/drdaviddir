@@ -98,8 +98,8 @@ def pull_model():
             if event.get("error"):
                 raise RuntimeError(event["error"])
             total, completed = event.get("total"), event.get("completed")
-            if total:
-                percent = int(completed / total * 100)
+            if isinstance(total, (int, float)) and total > 0 and isinstance(completed, (int, float)):
+                percent = max(0, min(100, int(completed / total * 100)))
                 if percent // 10 != last_percent // 10:
                     print(f"Model download: {percent}%", flush=True)
                     last_percent = percent

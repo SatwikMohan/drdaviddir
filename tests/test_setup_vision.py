@@ -1,5 +1,6 @@
 import sys
 import io
+import json
 import unittest
 from pathlib import Path
 from contextlib import redirect_stdout
@@ -60,3 +61,16 @@ class SetupVisionTests(unittest.TestCase):
         with patch.object(setup_vision, "api", return_value={"models": [model]}), redirect_stdout(output):
             setup_vision.report_processor()
         self.assertIn("100% GPU", output.getvalue())
+
+    def test_pull_progress_accepts_missing_completed(self):
+        events = [
+            {"status": "pulling manifest", "total": 100, "completed": None},
+            {"status": "downloading", "total": 100, "completed": 50},
+            {"status": "success"},
+        ]
+        stream = io.BytesIO(b"".join(json.dumps(event).encode() + b"\n" for event in events))
+        output = io.StringIO()
+        with patch.object(setup_vision.urllib.request, "urlopen", return_value=stream), redirect_stdout(output):
+            setup_vision.pull_model()
+        self.assertIn("Model download: 50%", output.getvalue())
+        self.assertIn("success", output.getvalue())
