@@ -9,7 +9,7 @@ def test_page_and_public_configuration():
         response=client.get("/")
         assert response.status_code==200
         html=response.text
-        assert html.count("<button")==1 and "<input" not in html and "<textarea" not in html
+        assert html.count("<button")==2 and 'id="camera"' in html and "<input" not in html and "<textarea" not in html
         assert "Khoj" not in html
         assert "AI-generated voice" in html
         with patch.object(config,"OPENAI_API_KEY","secret-marker"):
@@ -51,3 +51,30 @@ def test_websocket_end_to_end_with_mocked_provider():
             ws.send_json(payload)
             assert ws.receive_json()["type"]=="duplicate"
             assert stt.call_count==retrieval.call_count==generation.call_count==tts.call_count==1
+
+
+def test_visual_question_uses_cached_scene_even_with_right_now():
+    import base64
+    from unittest.mock import AsyncMock
+    async def answer(*args):
+        yield "I can see a red book."
+    scene = {"scene_summary": "A red book is held up to the camera", "objects": ["book"],
+             "visible_text": [], "confidence": .8, "timestamp": "2026-11-14T00:00:00Z", "status": "available"}
+    with patch("services.vision.VisualPerception.context", return_value=scene), \
+         patch("services.conversation.api.transcribe", AsyncMock(return_value="What can you see right now?")), \
+         patch("services.conversation.api.generate", side_effect=answer) as generation, \
+         patch("services.conversation.api.synthesize", AsyncMock(return_value=b"RIFF")), \
+         TestClient(app) as client:
+        with client.websocket_connect("/voice", headers={"origin": "http://testserver"}) as ws:
+            request_id = "visual-question-0001"
+            ws.send_json({"type": "utterance", "request_id": request_id,
+                          "audio": base64.b64encode(b"audio").decode(), "mime": "audio/wav"})
+            while True:
+                event = ws.receive_json()
+                if event["type"] == "audio":
+                    ws.send_json({"type": "played", "request_id": request_id, "sequence": event["sequence"]})
+                if event["type"] == "done":
+                    break
+                assert event["type"] != "error"
+    assert generation.call_count == 1
+    assert "A red book is held up to the camera" in generation.call_args.args[1]

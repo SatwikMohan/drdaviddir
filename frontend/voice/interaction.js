@@ -8,7 +8,7 @@ export function wavBuffer(chunks,rate){
 export class InteractionManager{
  constructor(cfg){this.cfg=cfg;this.id=null;this.userId=localStorage.getItem("penmanUserId")||crypto.randomUUID();localStorage.setItem("penmanUserId",this.userId);this.queue=[];this.state="idle";this.epoch=0;this.recording=false;this.playing=false;this.recoverable=false;this.preRoll=[];this.barge=0;this.frames=[];this.connect()}
  setState(state,message){this.state=state;stage.dataset.state=state;status.textContent=message||({idle:"Tap the microphone to begin",listening:"I'm listening... Pause when you have finished.",processing:"Just a moment...",transcribing:"Just a moment...",retrieving:"Just a moment...",generating:"Just a moment...",speaking:"You may speak to interrupt",interrupted:"I'm listening...",error:"Please try again"}[state]||"");button.setAttribute("aria-label",this.recoverable?"Retry remaining speech":state==="speaking"?"Interrupt and speak":"Start speaking");button.disabled=state==="listening"}
- connect(){this.socket=new WebSocket(`${location.protocol==="https:"?"wss":"ws"}://${location.host}/voice`);this.socket.onopen=()=>{button.disabled=false;this.setState("idle")};this.socket.onmessage=e=>this.event(JSON.parse(e.data));this.socket.onclose=()=>this.fail("The connection closed. Tap the microphone to reconnect.");this.socket.onerror=()=>this.fail("Cannot connect to the conversation service.")}
+ connect(){this.socket=new WebSocket(`${location.protocol==="https:"?"wss":"ws"}://${location.host}/voice`);this.socket.onopen=()=>{button.disabled=false;this.setState("idle");if(this.cameraStream)this.send({type:"camera_start"})};this.socket.onmessage=e=>this.event(JSON.parse(e.data));this.socket.onclose=()=>this.fail("The connection closed. Tap the microphone to reconnect.");this.socket.onerror=()=>this.fail("Cannot connect to the conversation service.")}
  send(message){if(this.socket.readyState!==WebSocket.OPEN)throw Error("Connection unavailable");this.socket.send(JSON.stringify(message))}
  async prepare(){
   if(this.context)return;
@@ -54,6 +54,10 @@ export class InteractionManager{
  }
  watchdog(){clearTimeout(this.timer);this.timer=setTimeout(()=>{try{this.send({type:"cancel",request_id:this.id})}catch{}this.fail("The conversation timed out. Please try again.")},this.cfg.turnTimeoutMs+5000)}
  event(message){
+  if(message.type==="camera_status"){
+   if(this.cameraStream)document.getElementById("cameraStatus").textContent=message.ready?"Visual context ready":({analysing:"Analysing scene...",unavailable:"Vision retrying...",starting:"Waiting for visual analysis...",available:"Refreshing scene..."}[message.status]||"Waiting for camera...");
+   return;
+  }
   if(message.request_id!==this.id)return;
   if(message.type==="state"){if(!this.playing)this.setState(["transcribing","retrieving","generating"].includes(message.state)?"processing":message.state)}
   else if(message.type==="audio"){
@@ -74,6 +78,28 @@ export class InteractionManager{
  }
  finish(){if(this.done&&!this.playing&&!this.queue.length){clearTimeout(this.timer);this.setState("idle")}}
  fail(message,preserve=false){this.epoch++;clearTimeout(this.timer);clearTimeout(this.recordTimer);this.recording=false;this.frames=[];this.stopAudio();if(!preserve){this.recoverable=false;try{this.send({type:"cancel",request_id:this.id})}catch{}}this.setState("error",message);button.disabled=false}
- dispose(){this.epoch++;clearTimeout(this.timer);clearTimeout(this.recordTimer);this.stopAudio();this.stream?.getTracks().forEach(t=>t.stop());this.context?.close();this.socket.close()}
+ dispose(){this.epoch++;clearTimeout(this.timer);clearTimeout(this.recordTimer);this.stopCamera();this.stopAudio();this.stream?.getTracks().forEach(t=>t.stop());this.context?.close();this.socket.close()}
 }
-try{const response=await fetch("/config");if(!response.ok)throw Error("Configuration unavailable");const cfg=await response.json();document.title=cfg.name;document.getElementById("name").textContent=cfg.name;const manager=new InteractionManager(cfg);window.interaction=manager;button.addEventListener("click",()=>manager.click());window.addEventListener("pagehide",()=>manager.dispose())}catch{status.textContent="The application could not connect. Please reload."}
+InteractionManager.prototype.toggleCamera=async function(){
+ if(this.cameraStream){this.stopCamera();return}
+ const label=document.getElementById("cameraStatus");
+ label.textContent="Starting camera...";
+ try{
+  if(!navigator.mediaDevices?.getUserMedia)throw Error("Camera access needs HTTPS or localhost.");
+  const stream=await navigator.mediaDevices.getUserMedia({video:{width:{ideal:this.cfg.cameraWidth},height:{ideal:this.cfg.cameraWidth},frameRate:{ideal:1}},audio:false});
+  this.cameraStream=stream;this.cameraVideo=document.createElement("video");this.cameraVideo.srcObject=stream;this.cameraVideo.muted=true;this.cameraVideo.playsInline=true;this.cameraVideo.autoplay=true;
+  this.cameraVideo.style.cssText="position:absolute;width:1px;height:1px;opacity:0;pointer-events:none";document.body.appendChild(this.cameraVideo);
+  await this.cameraVideo.play();
+  stream.getVideoTracks()[0].onended=()=>this.stopCamera();this.send({type:"camera_start"});
+  document.getElementById("camera").textContent="Camera on";document.getElementById("camera").setAttribute("aria-label","Disable camera");label.textContent="Waiting for visual analysis...";
+  this.cameraTimer=setInterval(()=>this.captureFrame(),this.cfg.cameraIntervalMs);this.captureFrame();
+ }catch(error){this.stopCamera();label.textContent=error.name==="NotAllowedError"?"Camera permission denied":error.message}
+};
+InteractionManager.prototype.captureFrame=function(){
+ if(!this.cameraStream||this.socket.readyState!==WebSocket.OPEN||this.socket.bufferedAmount>250000||!this.cameraVideo.videoWidth)return;
+ const canvas=document.createElement("canvas"),ratio=Math.min(1,this.cfg.cameraWidth/this.cameraVideo.videoWidth);canvas.width=Math.round(this.cameraVideo.videoWidth*ratio);canvas.height=Math.round(this.cameraVideo.videoHeight*ratio);
+ canvas.getContext("2d").drawImage(this.cameraVideo,0,0,canvas.width,canvas.height);
+ const image=canvas.toDataURL("image/jpeg",.65).split(",")[1];if(image.length<330000)this.send({type:"camera_frame",image});
+};
+InteractionManager.prototype.stopCamera=function(){clearInterval(this.cameraTimer);this.cameraTimer=null;this.cameraStream?.getTracks().forEach(t=>t.stop());this.cameraStream=null;if(this.cameraVideo){this.cameraVideo.srcObject=null;this.cameraVideo.remove()}this.cameraVideo=null;try{this.send({type:"camera_stop"})}catch{}document.getElementById("camera").textContent="Camera off";document.getElementById("camera").setAttribute("aria-label","Enable camera");document.getElementById("cameraStatus").textContent="Camera off"};
+try{const response=await fetch("/config");if(!response.ok)throw Error("Configuration unavailable");const cfg=await response.json();document.title=cfg.name;document.getElementById("name").textContent=cfg.name;const manager=new InteractionManager(cfg);window.interaction=manager;button.addEventListener("click",()=>manager.click());document.getElementById("camera").addEventListener("click",()=>manager.toggleCamera());window.addEventListener("pagehide",()=>manager.dispose())}catch{status.textContent="The application could not connect. Please reload."}

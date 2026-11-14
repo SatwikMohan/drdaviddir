@@ -53,7 +53,9 @@ def browser_config():
         rmsThreshold=config.RECORDING_RMS_THRESHOLD, bargeThreshold=config.BARGE_IN_RMS_THRESHOLD,
         preRollMs=config.RECORDING_PRE_ROLL_MS, bufferFrames=config.RECORDING_BUFFER_FRAMES,
         bargeMs=config.BARGE_IN_MIN_MS,
-        queueLimit=config.AUDIO_QUEUE_LIMIT, turnTimeoutMs=config.TURN_TIMEOUT_SECONDS*1000)
+        queueLimit=config.AUDIO_QUEUE_LIMIT, turnTimeoutMs=config.TURN_TIMEOUT_SECONDS*1000,
+        cameraIntervalMs=config.VISION_CAPTURE_INTERVAL_MS, cameraWidth=config.VISION_FRAME_WIDTH)
+
 
 @app.get("/health")
 def health():
@@ -96,6 +98,14 @@ async def voice(socket: WebSocket):
             kind = message.get("type")
             if kind == "utterance":
                 await session.start(message)
+            elif kind == "camera_start":
+                session.vision.start()
+            elif kind == "camera_frame":
+                session.vision.submit(message.get("image"))
+                await session.send("camera_status", status=session.vision.status,
+                                   ready=session.vision.context() is not None)
+            elif kind == "camera_stop":
+                await session.vision.stop()
             elif kind == "cancel":
                 await session.cancel()
             elif kind == "played":
@@ -111,6 +121,7 @@ async def voice(socket: WebSocket):
     except (ValueError, TypeError, KeyError):
         await socket.close(code=1008)
     finally:
+        await session.vision.stop()
         await session.cancel()
         app.state.sessions -= 1
 

@@ -96,6 +96,18 @@ RETRIEVAL_FETCH_K = 40
 HYBRID_SEARCH_ENABLED = True
 HYBRID_RRF_K = 60
 CONTEXT_MAX_CHARS = 16000
+VISION_OLLAMA_URL = os.environ.get("VISION_OLLAMA_URL", "http://127.0.0.1:11434")
+VISION_MODEL = os.environ.get("VISION_MODEL", "qwen3-vl:2b-instruct-q4_K_M")
+VISION_KEEP_ALIVE = os.environ.get("VISION_KEEP_ALIVE", "2m")
+VISION_CAPTURE_INTERVAL_MS = int(os.environ.get("VISION_CAPTURE_INTERVAL_MS", "3000"))
+VISION_FRAME_WIDTH = int(os.environ.get("VISION_FRAME_WIDTH", "512"))
+VISION_MAX_FRAME_BYTES = 250_000
+VISION_CHANGE_THRESHOLD = float(os.environ.get("VISION_CHANGE_THRESHOLD", "0.075"))
+VISION_COOLDOWN_SECONDS = float(os.environ.get("VISION_COOLDOWN_SECONDS", "12"))
+VISION_TIMEOUT_SECONDS = float(os.environ.get("VISION_TIMEOUT_SECONDS", "180"))
+VISION_FAILURE_BACKOFF_SECONDS = float(os.environ.get("VISION_FAILURE_BACKOFF_SECONDS", "30"))
+VISION_CONTEXT_TTL_SECONDS = float(os.environ.get("VISION_CONTEXT_TTL_SECONDS", "45"))
+VISION_HISTORY_LIMIT = 3
 
 
 
@@ -110,6 +122,12 @@ def validate_config():
         raise ValueError("Limits must be positive")
     if not 0 < RECORDING_MIN_SPEECH_MS < RECORDING_MAX_MS:
         raise ValueError("Invalid recording duration")
+    if VISION_FRAME_WIDTH < 64 or VISION_FRAME_WIDTH > 1024 or VISION_CAPTURE_INTERVAL_MS < 500:
+        raise ValueError("Invalid camera limits")
+    if not 0 <= VISION_CHANGE_THRESHOLD <= 1 or VISION_COOLDOWN_SECONDS < 0 or VISION_CONTEXT_TTL_SECONDS <= 0:
+        raise ValueError("Invalid vision thresholds")
+    if VISION_TIMEOUT_SECONDS <= 0 or VISION_FAILURE_BACKOFF_SECONDS < 0:
+        raise ValueError("Invalid vision timeout or retry delay")
 
 
 def configure_runtime_environment(**kwargs):
