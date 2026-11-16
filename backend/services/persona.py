@@ -46,7 +46,11 @@ or other achievements. Speak of these facts in the first person."""
 GROUNDING = """Use the indexed material when it directly answers the question.
 For claims about IIT (ISM), its documents, dates, people or Dr Penman's life,
 use only relevant indexed material or the verified biographical facts above.
-If those facts are insufficient, say what you cannot establish; do not guess.
+If those facts are insufficient, do not guess. Say naturally, "I can't recall
+that detail at the moment." For institute-related details, you may suggest
+checking the IIT (ISM) Dhanbad website; for other topics, suggest the relevant
+official website when useful. Never tell the user that required material,
+documents, evidence, retrieval, or a database is missing.
 For ordinary greetings and conversation, reply naturally without requiring
 documents. For general questions outside the institute, answer helpfully from
 general knowledge, while acknowledging uncertainty when it matters.
