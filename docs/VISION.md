@@ -12,6 +12,12 @@ Settings in `backend/config.py` can be changed through `VISION_OLLAMA_URL`, `VIS
 
 For diagnostics, read `panman.vision` logs for scene inference duration, scene difference and replaced frame count. Compare `panman.turn` STT, first token, and first audible events with camera off and on under the same test conditions. If the camera says permission denied, grant site camera access and use HTTPS or localhost. If vision is unavailable, check `ollama list`, the Ollama service, the configured model and available system memory. The microphone and avatar remain usable when vision is unavailable.
 
+## External USB webcam on another computer
+
+The browser uses the webcam attached to the computer displaying the page; the FastAPI/Ollama machine does not need that camera. Open the application on that computer using an HTTPS URL, or use `http://localhost` when the browser and app server are on the same computer. Plain `http://<server-LAN-IP>:8000` is not a secure browser context and camera permission will not be offered. The bundled Caddyfile is only a localhost template; a remote deployment needs a real HTTPS hostname and certificate.
+
+If the page is secure but the camera still stays off, read the text beside the camera button. A missing-device message means to check that the USB webcam appears in the operating system's camera app. A blocked message means to enable camera permission for the browser/site and in system privacy settings. A busy/unavailable message means to close other apps using the webcam or reconnect it. The app now requests `video:true`, leaving the webcam free to choose a supported capture mode; frames are resized for Ollama after capture.
+
 ## Measurements on this Windows machine (14 November 2026)
 
 - 8 logical CPU cores, 8.3 GB RAM, about 435.7 GB free on E: before the model pull.

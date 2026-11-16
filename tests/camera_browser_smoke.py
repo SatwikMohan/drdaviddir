@@ -12,6 +12,15 @@ with sync_playwright() as playwright:
     page.on("pageerror", lambda error: errors.append(str(error)))
     page.goto("http://127.0.0.1:8000", wait_until="domcontentloaded")
     page.wait_for_function("window.interaction && interaction.socket.readyState === WebSocket.OPEN")
+    if "--missing-device" in sys.argv:
+        page.evaluate("""() => { navigator.mediaDevices.getUserMedia = async () => {
+            throw new DOMException('Requested device not found', 'NotFoundError') } }""")
+        page.locator("#camera").click()
+        assert "No webcam found" in page.locator("#cameraStatus").inner_text()
+        assert page.locator("#camera").inner_text() == "Camera off"
+        browser.close()
+        print("PASS: missing webcam gives an actionable message")
+        raise SystemExit(0)
     page.evaluate("""() => { interaction.sentTypes=[]; const send=interaction.send.bind(interaction);
         interaction.send=(message)=>{interaction.sentTypes.push(message.type);send(message)} }""")
     page.locator("#camera").click()

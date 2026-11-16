@@ -85,15 +85,15 @@ InteractionManager.prototype.toggleCamera=async function(){
  const label=document.getElementById("cameraStatus");
  label.textContent="Starting camera...";
  try{
-  if(!navigator.mediaDevices?.getUserMedia)throw Error("Camera access needs HTTPS or localhost.");
-  const stream=await navigator.mediaDevices.getUserMedia({video:{width:{ideal:this.cfg.cameraWidth},height:{ideal:this.cfg.cameraWidth},frameRate:{ideal:1}},audio:false});
+  if(!window.isSecureContext||!navigator.mediaDevices?.getUserMedia)throw Error("Camera access needs HTTPS or localhost on this device.");
+  const stream=await navigator.mediaDevices.getUserMedia({video:true,audio:false});
   this.cameraStream=stream;this.cameraVideo=document.createElement("video");this.cameraVideo.srcObject=stream;this.cameraVideo.muted=true;this.cameraVideo.playsInline=true;this.cameraVideo.autoplay=true;
   this.cameraVideo.style.cssText="position:absolute;width:1px;height:1px;opacity:0;pointer-events:none";document.body.appendChild(this.cameraVideo);
   await this.cameraVideo.play();
   stream.getVideoTracks()[0].onended=()=>this.stopCamera();this.send({type:"camera_start"});
   document.getElementById("camera").textContent="Camera on";document.getElementById("camera").setAttribute("aria-label","Disable camera");label.textContent="Waiting for visual analysis...";
   this.cameraTimer=setInterval(()=>this.captureFrame(),this.cfg.cameraIntervalMs);this.captureFrame();
- }catch(error){this.stopCamera();label.textContent=error.name==="NotAllowedError"?"Camera permission denied":error.message}
+ }catch(error){this.stopCamera();label.textContent=({NotAllowedError:"Camera blocked: allow access in browser and system settings.",NotFoundError:"No webcam found: check its USB connection and system settings.",NotReadableError:"Webcam unavailable: close other camera apps or reconnect it.",AbortError:"Webcam could not start: reconnect it and try again.",OverconstrainedError:"Webcam does not support the requested settings.",SecurityError:"Camera access needs HTTPS or localhost on this device."}[error.name]||error.message||"Camera could not start.")}
 };
 InteractionManager.prototype.captureFrame=function(){
  if(!this.cameraStream||this.socket.readyState!==WebSocket.OPEN||this.socket.bufferedAmount>250000||!this.cameraVideo.videoWidth)return;
