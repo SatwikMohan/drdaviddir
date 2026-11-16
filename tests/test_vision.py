@@ -116,3 +116,40 @@ class VisionTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(infer.call_count, 2)
             self.assertEqual(seen, [1, 2])
             await vision.stop()
+
+    async def test_gradual_change_is_compared_with_last_analysed_scene(self):
+        vision = VisualPerception()
+        result = {"scene_summary": "A room", "objects": [], "visible_text": [], "confidence": .8}
+        with patch("services.vision.ollama_analyse", return_value=result) as infer, \
+             patch.object(config, "VISION_COOLDOWN_SECONDS", 0), \
+             patch.object(config, "VISION_PERIODIC_SECONDS", 1000), \
+             patch.object(config, "VISION_CHANGE_THRESHOLD", .075):
+            vision.start()
+            vision.submit(base64.b64encode(frame((50, 50, 50))).decode())
+            self.assertIsNotNone(await vision.wait_for_sequence(1, 2))
+            for level in (60, 68, 76):
+                vision.submit(base64.b64encode(frame((level, level, level))).decode())
+                await asyncio.sleep(.05)
+            self.assertEqual(infer.call_count, 2)
+            self.assertEqual(vision.context()["sequence_id"], 4)
+            await vision.stop()
+
+    async def test_wait_for_new_frame_does_not_return_previous_scene(self):
+        vision = VisualPerception()
+        observations = iter(("Previous scene", "New scene"))
+
+        def infer(data, detailed=False):
+            return {"scene_summary": next(observations), "objects": [],
+                    "visible_text": [], "confidence": .8}
+
+        with patch("services.vision.ollama_analyse", infer), \
+             patch.object(config, "VISION_COOLDOWN_SECONDS", 0):
+            vision.start()
+            vision.submit(base64.b64encode(frame((50, 50, 50))).decode())
+            self.assertEqual((await vision.wait_for_sequence(1, 2))["scene_summary"], "Previous scene")
+            waiter = asyncio.create_task(vision.wait_for_sequence(2, 2))
+            await asyncio.sleep(.02)
+            self.assertFalse(waiter.done())
+            vision.submit(base64.b64encode(frame((160, 160, 160))).decode())
+            self.assertEqual((await waiter)["scene_summary"], "New scene")
+            await vision.stop()

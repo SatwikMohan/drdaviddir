@@ -20,7 +20,7 @@ log = logging.getLogger("panman.turn")
 SOCIAL = re.compile(r"^(?:hello|hi|hey|good (?:morning|afternoon|evening)|good day|greetings|thank you|thanks|how are you|how do you do|nice to meet you)(?:[, ]+(?:there|(?:dr\.? )?(?:david )?penman))?[!?. ,]*$", re.I)
 IDENTITY_QUESTION = re.compile(r"^(?:who are you|what is your name|tell me about yourself|who (?:is|was) (?:dr\.? )?(?:david )?penman|are you (?:dr\.? )?(?:david )?penman)[?.! ]*$", re.I)
 BIOGRAPHY_QUESTION = re.compile(r"(?i)(?=.*\b(?:you|your|penman)\b)(?=.*\b(?:background|career|research|life|work|principal|director|role|thesis|school|achievements|history|identity|about|name)\b)")
-VISUAL_QUESTION = re.compile(r"\b(?:see|look|showing|holding|wearing|camera|visible|picture|image|read this|what is this|what's this|in my hand|my shirt|my clothes)\b", re.I)
+VISUAL_QUESTION = re.compile(r"\b(?:see|look|showing|holding|wearing|camera|visible|picture|image|scene|surroundings|around me|what changed|what's changed|read this|what is this|what's this|in my hand|my shirt|my clothes)\b", re.I)
 
 class Conversation:
     def __init__(self, socket, capacity):
@@ -38,6 +38,7 @@ class Conversation:
         self.send_lock = asyncio.Lock()
         self.client_state = "idle"
         self.proactive_task = None
+        self.proactive_timer = None
         self.pending_proactive = None
         self.last_proactive_at = float("-inf")
         self.idle_since = time.monotonic()
@@ -60,7 +61,8 @@ class Conversation:
             return
         if item["confidence"] < config.VISION_PROACTIVE_MIN_CONFIDENCE:
             return
-        if change >= config.VISION_PROACTIVE_CHANGE_THRESHOLD:
+        if change >= config.VISION_PROACTIVE_CHANGE_THRESHOLD or (
+                self.pending_proactive and self.pending_proactive[1] == "change"):
             reason = "change"
         elif not self.idle_nudge_attempted:
             reason = "idle"
@@ -70,6 +72,9 @@ class Conversation:
         self._schedule_proactive()
 
     def _schedule_proactive(self):
+        if self.proactive_timer:
+            self.proactive_timer.cancel()
+            self.proactive_timer = None
         if not self.pending_proactive or self.client_state != "idle" or not self.vision.enabled:
             return
         sequence, reason = self.pending_proactive
@@ -77,12 +82,16 @@ class Conversation:
         required_idle = (config.VISION_PROACTIVE_IDLE_SECONDS if reason == "idle"
                          else config.VISION_PROACTIVE_CHANGE_IDLE_SECONDS)
         if idle_seconds < required_idle:
+            self.proactive_timer = asyncio.get_running_loop().call_later(
+                required_idle - idle_seconds, self._schedule_proactive)
             return
         if self.task and not self.task.done():
             return
         if self.proactive_task and not self.proactive_task.done():
             return
-        if time.monotonic() - self.last_proactive_at < config.VISION_PROACTIVE_COOLDOWN_SECONDS:
+        cooldown_left = config.VISION_PROACTIVE_COOLDOWN_SECONDS - (time.monotonic() - self.last_proactive_at)
+        if cooldown_left > 0:
+            self.proactive_timer = asyncio.get_running_loop().call_later(cooldown_left, self._schedule_proactive)
             return
         item = self.vision.context()
         if not item or item["sequence_id"] != sequence:
@@ -108,6 +117,9 @@ class Conversation:
             await self.cancel_proactive(clear_pending=True)
 
     async def cancel_proactive(self, clear_pending=True):
+        if self.proactive_timer:
+            self.proactive_timer.cancel()
+            self.proactive_timer = None
         if clear_pending:
             self.pending_proactive = None
         if self.proactive_task and not self.proactive_task.done():
@@ -198,7 +210,8 @@ class Conversation:
             log.info("stage request_id=%s name=audio_capture latency_ms=%.1f", rid, capture_ms)
         self.seen.add(rid)
         self.current = rid
-        self.task = asyncio.create_task(self.turn(data, message.get("mime", "")))
+        visual_sequence = self.vision.sequence if message.get("visual_frame_sent") else None
+        self.task = asyncio.create_task(self.turn(data, message.get("mime", ""), visual_sequence))
 
     def acknowledge(self, message):
         if message.get("request_id") == self.current:
@@ -250,7 +263,7 @@ class Conversation:
         except Exception:
             await self.send("error", message=message)
 
-    async def turn(self, data, mime):
+    async def turn(self, data, mime, visual_sequence=None):
         token = api.request_id.set(self.current)
         worker = None
         turn_started = time.monotonic()
@@ -266,8 +279,12 @@ class Conversation:
                         return
                     visual = self.vision.context()
                     visual_question = bool(VISUAL_QUESTION.search(question))
-                    if visual_question:
+                    if visual_question and self.vision.enabled:
                         self.vision.request_detail()
+                        required_sequence = (visual_sequence if visual_sequence is not None else
+                                             max(self.vision.sequence, (visual or {}).get("sequence_id", 0) + 1))
+                        visual = await self.vision.wait_for_sequence(
+                            required_sequence, config.VISION_QUESTION_WAIT_SECONDS)
                     routed_at = time.monotonic()
                     decision = route(question, self.history)
                     log.info("route request_id=%s category=%s latency_ms=%.1f", self.current, decision.category, (time.monotonic()-routed_at)*1000)

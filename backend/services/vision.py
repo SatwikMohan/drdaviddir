@@ -72,12 +72,14 @@ class VisualPerception:
         self.latest = None
         self.history = deque(maxlen=config.VISION_HISTORY_LIMIT)
         self.last_pixels = None
+        self.last_analysed_pixels = None
         self.last_inference = 0.0
         self.retry_after = 0.0
         self.dropped = 0
         self.detailed = False
         self.status = "off"
         self.on_observation = on_observation
+        self.observation_ready = asyncio.Condition()
 
     def start(self):
         self.closed = False
@@ -106,6 +108,17 @@ class VisualPerception:
         if self.pending:
             self.event.set()
 
+    async def wait_for_sequence(self, sequence, timeout):
+        async with self.observation_ready:
+            try:
+                await asyncio.wait_for(self.observation_ready.wait_for(
+                    lambda: not self.enabled or (self.latest is not None and
+                    self.latest["sequence_id"] >= sequence)), timeout)
+            except asyncio.TimeoutError:
+                return None
+        item = self.context()
+        return item if item and item["sequence_id"] >= sequence else None
+
     def context(self):
         item = self.latest
         if not self.enabled or not item or time.monotonic() - item["received_at"] > config.VISION_CONTEXT_TTL_SECONDS:
@@ -117,7 +130,12 @@ class VisualPerception:
         self.closed = True
         self.pending = None
         self.latest = None
+        self.last_analysed_pixels = None
+        self.last_inference = 0.0
+        self.retry_after = 0.0
         self.history.clear()
+        async with self.observation_ready:
+            self.observation_ready.notify_all()
         self.event.set()
         if self.worker:
             self.worker.cancel()
@@ -140,7 +158,7 @@ class VisualPerception:
             try:
                 frame, pixels = await asyncio.to_thread(preprocess, raw)
                 preprocess_ms = (time.monotonic() - started) * 1000
-                change = difference(pixels, self.last_pixels) if self.last_pixels else 1.0
+                change = difference(pixels, self.last_analysed_pixels) if self.last_analysed_pixels else 1.0
                 self.last_pixels = pixels
                 now = time.monotonic()
                 if now < self.retry_after:
@@ -166,9 +184,12 @@ class VisualPerception:
                         "confidence": confidence, "timestamp": datetime.now(timezone.utc).isoformat(),
                         "sequence_id": sequence, "status": "available", "received_at": time.monotonic()}
                 self.latest = item
+                self.last_analysed_pixels = pixels
                 self.history.append(item)
                 self.status = "available"
                 self.retry_after = 0.0
+                async with self.observation_ready:
+                    self.observation_ready.notify_all()
                 if self.on_observation:
                     self.on_observation(item, change)
                 log.info("scene sequence=%s preprocess_ms=%.1f inference_ms=%.1f total_ms=%.1f changed=%.3f dropped=%s", sequence,

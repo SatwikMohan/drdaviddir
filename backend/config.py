@@ -115,6 +115,7 @@ VISION_PROACTIVE_CHANGE_IDLE_SECONDS = float(os.environ.get("VISION_PROACTIVE_CH
 VISION_TIMEOUT_SECONDS = float(os.environ.get("VISION_TIMEOUT_SECONDS", "180"))
 VISION_FAILURE_BACKOFF_SECONDS = float(os.environ.get("VISION_FAILURE_BACKOFF_SECONDS", "30"))
 VISION_CONTEXT_TTL_SECONDS = float(os.environ.get("VISION_CONTEXT_TTL_SECONDS", "45"))
+VISION_QUESTION_WAIT_SECONDS = float(os.environ.get("VISION_QUESTION_WAIT_SECONDS", "25"))
 VISION_HISTORY_LIMIT = 3
 
 
@@ -134,7 +135,7 @@ def validate_config():
         raise ValueError("Invalid camera limits")
     if not 0 <= VISION_CHANGE_THRESHOLD <= 1 or VISION_COOLDOWN_SECONDS < 0 or VISION_PERIODIC_SECONDS <= 0 or VISION_CONTEXT_TTL_SECONDS <= 0:
         raise ValueError("Invalid vision thresholds")
-    if VISION_TIMEOUT_SECONDS <= 0 or VISION_FAILURE_BACKOFF_SECONDS < 0:
+    if VISION_TIMEOUT_SECONDS <= 0 or VISION_FAILURE_BACKOFF_SECONDS < 0 or VISION_QUESTION_WAIT_SECONDS <= 0:
         raise ValueError("Invalid vision timeout or retry delay")
     if not 0 <= VISION_PROACTIVE_CHANGE_THRESHOLD <= 1 or not 0 <= VISION_PROACTIVE_MIN_CONFIDENCE <= 1 or VISION_PROACTIVE_COOLDOWN_SECONDS < 10:
         raise ValueError("Invalid proactive vision limits")
