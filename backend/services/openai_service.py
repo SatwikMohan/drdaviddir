@@ -101,8 +101,10 @@ async def generate(messages, instructions):
 async def synthesize(text):
     with usage("speech", config.OPENAI_TTS_MODEL) as record:
         # One request per complete group; binary chunks are assembled into one playable WAV.
+        voice = ({"id": config.OPENAI_TTS_CUSTOM_VOICE_ID}
+                 if config.OPENAI_TTS_CUSTOM_VOICE_ID else config.OPENAI_TTS_VOICE)
         async with async_client().audio.speech.with_streaming_response.create(
-            model=config.OPENAI_TTS_MODEL, voice=config.OPENAI_TTS_VOICE, input=text,
+            model=config.OPENAI_TTS_MODEL, voice=voice, input=text,
             instructions=config.OPENAI_TTS_INSTRUCTIONS, speed=config.OPENAI_TTS_SPEED, response_format="wav") as response:
             chunks = []
             async for chunk in response.iter_bytes():

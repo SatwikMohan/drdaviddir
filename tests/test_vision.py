@@ -11,6 +11,7 @@ from PIL import Image
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend"))
 from services.vision import VisualPerception, difference, preprocess
+import config
 
 
 def frame(colour):
@@ -89,4 +90,29 @@ class VisionTests(unittest.IsolatedAsyncioTestCase):
             vision.submit(encoded)
             await asyncio.sleep(.1)
             self.assertEqual(infer.call_count, 1)
+            await vision.stop()
+
+    async def test_identical_scene_is_refreshed_periodically(self):
+        seen = []
+        vision = VisualPerception(lambda item, change: seen.append(item["sequence_id"]))
+        encoded = base64.b64encode(frame((80, 30, 20))).decode()
+        result = {"scene_summary": "A room", "objects": [], "visible_text": [], "confidence": .8}
+        with patch("services.vision.ollama_analyse", return_value=result) as infer, \
+             patch.object(config, "VISION_COOLDOWN_SECONDS", 0), \
+             patch.object(config, "VISION_PERIODIC_SECONDS", .05):
+            vision.start()
+            vision.submit(encoded)
+            for _ in range(30):
+                if vision.context():
+                    break
+                await asyncio.sleep(.05)
+            self.assertIsNotNone(vision.context())
+            await asyncio.sleep(.06)
+            vision.submit(encoded)
+            for _ in range(30):
+                if infer.call_count == 2:
+                    break
+                await asyncio.sleep(.05)
+            self.assertEqual(infer.call_count, 2)
+            self.assertEqual(seen, [1, 2])
             await vision.stop()

@@ -13,3 +13,5 @@ raw_data_files/
 backend/evals/voice_samples/
 frontend/tests/avatar_smoke.*
 frontend/tests/avatar_mobile_smoke.*
+.pytest_cache/
+**/.pytest_cache/

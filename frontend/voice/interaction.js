@@ -7,8 +7,8 @@ export function wavBuffer(chunks,rate){
 }
 export class InteractionManager{
  constructor(cfg){this.cfg=cfg;this.id=null;this.userId=localStorage.getItem("penmanUserId")||crypto.randomUUID();localStorage.setItem("penmanUserId",this.userId);this.queue=[];this.state="idle";this.epoch=0;this.recording=false;this.playing=false;this.recoverable=false;this.preRoll=[];this.barge=0;this.frames=[];this.connect()}
- setState(state,message){this.state=state;stage.dataset.state=state;status.textContent=message||({idle:"Tap the microphone to begin",listening:"I'm listening... Pause when you have finished.",processing:"Just a moment...",transcribing:"Just a moment...",retrieving:"Just a moment...",generating:"Just a moment...",speaking:"You may speak to interrupt",interrupted:"I'm listening...",error:"Please try again"}[state]||"");button.setAttribute("aria-label",this.recoverable?"Retry remaining speech":state==="speaking"?"Interrupt and speak":"Start speaking");button.disabled=state==="listening"}
- connect(){this.socket=new WebSocket(`${location.protocol==="https:"?"wss":"ws"}://${location.host}/voice`);this.socket.onopen=()=>{button.disabled=false;this.setState("idle");if(this.cameraStream)this.send({type:"camera_start"})};this.socket.onmessage=e=>this.event(JSON.parse(e.data));this.socket.onclose=()=>this.fail("The connection closed. Tap the microphone to reconnect.");this.socket.onerror=()=>this.fail("Cannot connect to the conversation service.")}
+ setState(state,message){this.state=state;stage.dataset.state=state;status.textContent=message||({idle:"Tap the microphone to begin",listening:"I'm listening... Pause when you have finished.",processing:"Just a moment...",transcribing:"Just a moment...",retrieving:"Just a moment...",generating:"Just a moment...",speaking:"You may speak to interrupt",interrupted:"I'm listening...",error:"Please try again"}[state]||"");button.setAttribute("aria-label",this.recoverable?"Retry remaining speech":state==="speaking"?"Interrupt and speak":"Start speaking");button.disabled=state==="listening";const reported=state==="speaking"&&this.proactivePlaying?"proactive_speaking":state;if(this.socket?.readyState===WebSocket.OPEN&&this.lastReportedState!==reported){this.lastReportedState=reported;this.send({type:"client_state",state:reported})}}
+ connect(){this.socket=new WebSocket(`${location.protocol==="https:"?"wss":"ws"}://${location.host}/voice`);this.socket.onopen=()=>{this.lastReportedState=null;button.disabled=false;this.setState("idle");if(this.cameraStream)this.send({type:"camera_start"})};this.socket.onmessage=e=>this.event(JSON.parse(e.data));this.socket.onclose=()=>this.fail("The connection closed. Tap the microphone to reconnect.");this.socket.onerror=()=>this.fail("Cannot connect to the conversation service.")}
  send(message){if(this.socket.readyState!==WebSocket.OPEN)throw Error("Connection unavailable");this.socket.send(JSON.stringify(message))}
  async prepare(){
   if(this.context)return;
@@ -29,7 +29,7 @@ export class InteractionManager{
    await window.prepareAvatarAudio?.();await this.prepare();await this.context.resume();this.begin();
   }catch(error){this.fail(error.name==="NotAllowedError"?"Please allow microphone access in your browser.":error.message)}finally{this.starting=false}
  }
- stopAudio(){audio.pause();audio.removeAttribute("src");audio.load();if(this.url)URL.revokeObjectURL(this.url);this.url=null;this.queue=[];this.playing=false;this.currentAudio=null}
+ stopAudio(){audio.pause();audio.removeAttribute("src");audio.load();if(this.url)URL.revokeObjectURL(this.url);this.url=null;this.queue=[];this.playing=false;this.proactivePlaying=false;this.currentAudio=null}
  begin(){
   const interrupted=this.state==="speaking";this.epoch++;this.send({type:"cancel",request_id:this.id});this.stopAudio();clearTimeout(this.timer);
   this.id=crypto.randomUUID();this.nextSequence=0;this.recoverable=false;this.done=false;this.recording=true;this.frames=[...this.preRoll];this.preRoll=[];this.started=performance.now();this.speechMs=0;this.lastSpeech=this.started;this.barge=0;
@@ -54,6 +54,7 @@ export class InteractionManager{
  }
  watchdog(){clearTimeout(this.timer);this.timer=setTimeout(()=>{try{this.send({type:"cancel",request_id:this.id})}catch{}this.fail("The conversation timed out. Please try again.")},this.cfg.turnTimeoutMs+5000)}
  event(message){
+  if(message.type==="proactive_audio"){this.playProactive(message);return}
   if(message.type==="camera_status"){
    if(this.cameraStream)document.getElementById("cameraStatus").textContent=message.ready?"Visual context ready":({analysing:"Analysing scene...",unavailable:"Vision retrying...",starting:"Waiting for visual analysis...",available:"Refreshing scene..."}[message.status]||"Waiting for camera...");
    return;
@@ -75,6 +76,16 @@ export class InteractionManager{
    audio.onerror=()=>{if(epoch===this.epoch)this.fail("Audio playback failed. Tap the microphone to speak again.")};
    await audio.play();if(epoch===this.epoch){if(segment.sequence===0)this.send({type:"audible",request_id:this.id,latency_ms:Math.round(performance.now()-this.sentAt)});this.setState("speaking")}
   }catch{if(epoch===this.epoch)this.fail("Audio playback is blocked. Tap the microphone and try again.")}
+ }
+ async playProactive(message){
+  if(!this.cameraStream||this.state!=="idle"||this.recording||this.playing||this.starting)return;
+  const epoch=this.epoch;this.playing=true;this.proactivePlaying=true;
+  try{
+   const bytes=Uint8Array.from(atob(message.audio),c=>c.charCodeAt(0));this.url=URL.createObjectURL(new Blob([bytes],{type:message.mime}));audio.src=this.url;
+   audio.onended=()=>{if(epoch!==this.epoch)return;this.stopAudio();this.setState("idle")};
+   audio.onerror=()=>{if(epoch!==this.epoch)return;this.stopAudio();this.setState("idle")};
+   await audio.play();if(epoch===this.epoch)this.setState("speaking");
+  }catch{if(epoch===this.epoch){this.stopAudio();this.setState("idle")}}
  }
  finish(){if(this.done&&!this.playing&&!this.queue.length){clearTimeout(this.timer);this.setState("idle")}}
  fail(message,preserve=false){this.epoch++;clearTimeout(this.timer);clearTimeout(this.recordTimer);this.recording=false;this.frames=[];this.stopAudio();if(!preserve){this.recoverable=false;try{this.send({type:"cancel",request_id:this.id})}catch{}}this.setState("error",message);button.disabled=false}
@@ -101,5 +112,5 @@ InteractionManager.prototype.captureFrame=function(){
  canvas.getContext("2d").drawImage(this.cameraVideo,0,0,canvas.width,canvas.height);
  const image=canvas.toDataURL("image/jpeg",.65).split(",")[1];if(image.length<330000)this.send({type:"camera_frame",image});
 };
-InteractionManager.prototype.stopCamera=function(){clearInterval(this.cameraTimer);this.cameraTimer=null;this.cameraStream?.getTracks().forEach(t=>t.stop());this.cameraStream=null;if(this.cameraVideo){this.cameraVideo.srcObject=null;this.cameraVideo.remove()}this.cameraVideo=null;try{this.send({type:"camera_stop"})}catch{}document.getElementById("camera").textContent="Camera off";document.getElementById("camera").setAttribute("aria-label","Enable camera");document.getElementById("cameraStatus").textContent="Camera off"};
+InteractionManager.prototype.stopCamera=function(){clearInterval(this.cameraTimer);this.cameraTimer=null;this.cameraStream?.getTracks().forEach(t=>t.stop());this.cameraStream=null;if(this.cameraVideo){this.cameraVideo.srcObject=null;this.cameraVideo.remove()}this.cameraVideo=null;if(this.proactivePlaying){this.epoch++;this.stopAudio();this.setState("idle")}try{this.send({type:"camera_stop"})}catch{}document.getElementById("camera").textContent="Camera off";document.getElementById("camera").setAttribute("aria-label","Enable camera");document.getElementById("cameraStatus").textContent="Camera off"};
 try{const response=await fetch("/config");if(!response.ok)throw Error("Configuration unavailable");const cfg=await response.json();document.title=cfg.name;document.getElementById("name").textContent=cfg.name;const manager=new InteractionManager(cfg);window.interaction=manager;button.addEventListener("click",()=>manager.click());document.getElementById("camera").addEventListener("click",()=>manager.toggleCamera());window.addEventListener("pagehide",()=>manager.dispose())}catch{status.textContent="The application could not connect. Please reload."}

@@ -102,7 +102,7 @@ a page reload or connection loss starts a fresh isolated session.
 ## Models and voice
 
 Defaults are `gpt-5.4-mini`, `text-embedding-3-small` (1536 dimensions),
-`gpt-transcribe`, and `gpt-4o-mini-tts` with `cedar` and British delivery instructions.
+`gpt-transcribe`, and `gpt-4o-mini-tts` with `onyx` and British delivery instructions.
 The small chat/embedding models keep routine grounded conversations economical;
 transcription uses the current documented file endpoint. These are configurable,
 not claims of measured latency, cost or account access.
@@ -115,11 +115,15 @@ See [OpenAI Speech documentation](https://developers.openai.com/api/docs/guides/
 [chat model](https://developers.openai.com/api/docs/models/gpt-5.4-mini), and
 [embeddings](https://developers.openai.com/api/docs/guides/embeddings).
 
-Cedar is a provisional candidate. No live voice/accent evaluation was possible
-without credentials. British accent, maturity and masculine delivery remain
-unvalidated; compare cedar and onyx with the same instructions and representative
-sentences before launch. Do not assume a voice name guarantees an accent.
-`backend/scripts/validate_voice.py` creates samples only when explicitly run.
+Onyx is the default voice, matching the settings used to make
+`voice-audition/onyx-british-mature.wav`. The WAV is a fixed audition sample;
+new replies are generated with the same voice settings.
+Voice and accent are subjective; audition the output before using it with an audience.
+Set `OPENAI_TTS_VOICE` to another built-in voice if preferred. For an approved
+recorded custom voice, set `OPENAI_TTS_CUSTOM_VOICE_ID` to its voice ID; it takes
+precedence over `OPENAI_TTS_VOICE`. Custom voice creation requires an eligible
+OpenAI account and a consent recording from the speaker. `backend/scripts/validate_voice.py`
+creates samples only when explicitly run.
 
 ## Diagnostics, tests and deployment
 

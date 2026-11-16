@@ -104,4 +104,7 @@ def test_tts_voice_and_cancellation():
             assert stream.closed
             assert create.call_args.kwargs["voice"]==config.OPENAI_TTS_VOICE
             assert "British" in create.call_args.kwargs["instructions"]
+            with patch.object(config,"OPENAI_TTS_CUSTOM_VOICE_ID","voice_approved"):
+                assert await api.synthesize("Hello again.")==b"RIFFaudio"
+                assert create.call_args.kwargs["voice"]=={"id":"voice_approved"}
     asyncio.run(run())

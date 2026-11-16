@@ -15,7 +15,8 @@ OPENAI_EMBED_MODEL = "text-embedding-3-small"
 OPENAI_EMBED_DIMENSIONS = 1536
 OPENAI_STT_MODEL = "gpt-transcribe"
 OPENAI_TTS_MODEL = os.environ.get("OPENAI_TTS_MODEL", "gpt-4o-mini-tts")
-OPENAI_TTS_VOICE = os.environ.get("OPENAI_TTS_VOICE", "echo")
+OPENAI_TTS_VOICE = os.environ.get("OPENAI_TTS_VOICE", "onyx")
+OPENAI_TTS_CUSTOM_VOICE_ID = os.environ.get("OPENAI_TTS_CUSTOM_VOICE_ID", "").strip()
 OPENAI_TTS_INSTRUCTIONS = os.environ.get("OPENAI_TTS_INSTRUCTIONS", (
     "Speak English throughout with a strong, authentic British accent: educated Southern British "
     "pronunciation, clear non-rhotic vowels, and natural British stress and intonation. "
@@ -104,6 +105,13 @@ VISION_FRAME_WIDTH = int(os.environ.get("VISION_FRAME_WIDTH", "512"))
 VISION_MAX_FRAME_BYTES = 250_000
 VISION_CHANGE_THRESHOLD = float(os.environ.get("VISION_CHANGE_THRESHOLD", "0.075"))
 VISION_COOLDOWN_SECONDS = float(os.environ.get("VISION_COOLDOWN_SECONDS", "12"))
+VISION_PERIODIC_SECONDS = float(os.environ.get("VISION_PERIODIC_SECONDS", "25"))
+VISION_PROACTIVE_ENABLED = os.environ.get("VISION_PROACTIVE_ENABLED", "1").lower() not in {"0", "false", "no"}
+VISION_PROACTIVE_CHANGE_THRESHOLD = float(os.environ.get("VISION_PROACTIVE_CHANGE_THRESHOLD", "0.18"))
+VISION_PROACTIVE_COOLDOWN_SECONDS = float(os.environ.get("VISION_PROACTIVE_COOLDOWN_SECONDS", "90"))
+VISION_PROACTIVE_MIN_CONFIDENCE = float(os.environ.get("VISION_PROACTIVE_MIN_CONFIDENCE", "0.65"))
+VISION_PROACTIVE_IDLE_SECONDS = float(os.environ.get("VISION_PROACTIVE_IDLE_SECONDS", "45"))
+VISION_PROACTIVE_CHANGE_IDLE_SECONDS = float(os.environ.get("VISION_PROACTIVE_CHANGE_IDLE_SECONDS", "10"))
 VISION_TIMEOUT_SECONDS = float(os.environ.get("VISION_TIMEOUT_SECONDS", "180"))
 VISION_FAILURE_BACKOFF_SECONDS = float(os.environ.get("VISION_FAILURE_BACKOFF_SECONDS", "30"))
 VISION_CONTEXT_TTL_SECONDS = float(os.environ.get("VISION_CONTEXT_TTL_SECONDS", "45"))
@@ -124,10 +132,14 @@ def validate_config():
         raise ValueError("Invalid recording duration")
     if VISION_FRAME_WIDTH < 64 or VISION_FRAME_WIDTH > 1024 or VISION_CAPTURE_INTERVAL_MS < 500:
         raise ValueError("Invalid camera limits")
-    if not 0 <= VISION_CHANGE_THRESHOLD <= 1 or VISION_COOLDOWN_SECONDS < 0 or VISION_CONTEXT_TTL_SECONDS <= 0:
+    if not 0 <= VISION_CHANGE_THRESHOLD <= 1 or VISION_COOLDOWN_SECONDS < 0 or VISION_PERIODIC_SECONDS <= 0 or VISION_CONTEXT_TTL_SECONDS <= 0:
         raise ValueError("Invalid vision thresholds")
     if VISION_TIMEOUT_SECONDS <= 0 or VISION_FAILURE_BACKOFF_SECONDS < 0:
         raise ValueError("Invalid vision timeout or retry delay")
+    if not 0 <= VISION_PROACTIVE_CHANGE_THRESHOLD <= 1 or not 0 <= VISION_PROACTIVE_MIN_CONFIDENCE <= 1 or VISION_PROACTIVE_COOLDOWN_SECONDS < 10:
+        raise ValueError("Invalid proactive vision limits")
+    if VISION_PROACTIVE_IDLE_SECONDS < 10 or VISION_PROACTIVE_CHANGE_IDLE_SECONDS < 0:
+        raise ValueError("Invalid proactive idle limits")
 
 
 def configure_runtime_environment(**kwargs):

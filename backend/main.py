@@ -99,13 +99,16 @@ async def voice(socket: WebSocket):
             if kind == "utterance":
                 await session.start(message)
             elif kind == "camera_start":
-                session.vision.start()
+                session.start_camera()
             elif kind == "camera_frame":
                 session.vision.submit(message.get("image"))
                 await session.send("camera_status", status=session.vision.status,
                                    ready=session.vision.context() is not None)
             elif kind == "camera_stop":
+                await session.cancel_proactive()
                 await session.vision.stop()
+            elif kind == "client_state":
+                await session.set_client_state(message.get("state"))
             elif kind == "cancel":
                 await session.cancel()
             elif kind == "played":

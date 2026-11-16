@@ -62,7 +62,7 @@ def _ollama_analyse_locked(frame, detailed=False):
 
 
 class VisualPerception:
-    def __init__(self):
+    def __init__(self, on_observation=None):
         self.pending = None
         self.event = asyncio.Event()
         self.worker = None
@@ -77,6 +77,7 @@ class VisualPerception:
         self.dropped = 0
         self.detailed = False
         self.status = "off"
+        self.on_observation = on_observation
 
     def start(self):
         self.closed = False
@@ -144,7 +145,7 @@ class VisualPerception:
                 now = time.monotonic()
                 if now < self.retry_after:
                     continue
-                if change < config.VISION_CHANGE_THRESHOLD and not self.detailed and now - self.last_inference < config.VISION_CONTEXT_TTL_SECONDS / 2:
+                if change < config.VISION_CHANGE_THRESHOLD and not self.detailed and now - self.last_inference < config.VISION_PERIODIC_SECONDS:
                     continue
                 if now - self.last_inference < config.VISION_COOLDOWN_SECONDS and not self.detailed:
                     continue
@@ -168,6 +169,8 @@ class VisualPerception:
                 self.history.append(item)
                 self.status = "available"
                 self.retry_after = 0.0
+                if self.on_observation:
+                    self.on_observation(item, change)
                 log.info("scene sequence=%s preprocess_ms=%.1f inference_ms=%.1f total_ms=%.1f changed=%.3f dropped=%s", sequence,
                          preprocess_ms, inference_ms, (time.monotonic()-started)*1000, change, self.dropped)
             except asyncio.CancelledError:

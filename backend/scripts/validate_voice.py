@@ -16,7 +16,8 @@ SAMPLES = [
 async def run(output):
     output.mkdir(parents=True,exist_ok=True)
     for i,text in enumerate(SAMPLES,1):
-        (output/f"{config.OPENAI_TTS_VOICE}-{i}.wav").write_bytes(await synthesize(text))
+        label = "custom" if config.OPENAI_TTS_CUSTOM_VOICE_ID else config.OPENAI_TTS_VOICE
+        (output/f"{label}-{i}.wav").write_bytes(await synthesize(text))
     print("Samples written. Listen for accent, masculine character, pacing and articulation; quality is not automatically validated.")
 
 if __name__=="__main__":
