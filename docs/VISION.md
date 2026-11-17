@@ -1,5 +1,7 @@
 # Local camera perception
 
+Idle remarks invite conversation instead of narrating the image. They may draw on recent conversation and explicit interests or preferences saved for the current user ID. Obvious scene descriptions are suppressed, and the agent may remain silent when there is no natural opening.
+
 The browser voice page now has a **Camera off / Camera on** control. Camera permission is requested only after a click. Browser capture and microphone capture are independent. The camera preview stays hidden; stopping the camera or closing the page stops its media tracks. Use localhost or HTTPS for browser camera permission. **Camera on** means capture is active; wait for **Visual context ready** before asking what the agent sees. The first local model load can take over a minute on this machine. If you ask early, the agent will say that analysis is still in progress.
 
 Run the FastAPI application as before, with one worker. Ollama must run on the same backend machine, since camera images go from the browser to this server and then to the local Ollama HTTP service. No camera image is sent to OpenAI. Start Ollama on Windows with `ollama serve` if its desktop service is not already running. Stop the Ollama service using its desktop app or by stopping that process.

@@ -138,3 +138,57 @@ def test_scene_question_uses_frame_submitted_with_utterance():
         assert any(event["type"] == "audio" for event in socket.events)
 
     asyncio.run(run())
+
+
+def test_idle_remark_uses_conversation_and_explicit_memory():
+    async def social_remark(messages, instructions):
+        assert "not as a camera narrator" in instructions
+        assert "explicit remembered interest" in instructions
+        content = messages[0]["content"]
+        assert "ventilation research" in content
+        assert "I am interested in mine ventilation" in content
+        assert "Previous visual observation: An empty room" in content
+        yield "How is your ventilation research coming along?"
+
+    async def run():
+        socket = Socket()
+        session = Conversation(socket, asyncio.Semaphore(1))
+        session.user_id = "returning-user"
+        session.history = [{"role": "user", "content": "I am working on ventilation research"},
+                           {"role": "assistant", "content": "That sounds interesting."}]
+        session.vision.enabled = True
+        prior = scene(1)
+        prior["scene_summary"] = "An empty room"
+        current = scene(2)
+        session.vision.history.extend((prior, current))
+        session.vision.latest = current
+        session.idle_since = time.monotonic() - 60
+        with patch("services.conversation.memory.relevant", return_value="USER_INTERESTS: I am interested in mine ventilation") as relevant, \
+             patch("services.conversation.api.generate", side_effect=social_remark), \
+             patch("services.conversation.api.synthesize", AsyncMock(return_value=b"RIFF")) as synthesize:
+            session._visual_observation(current, 0)
+            await session.proactive_task
+        relevant.assert_called_once_with("I am working on ventilation research", user_id="returning-user")
+        synthesize.assert_awaited_once_with("How is your ventilation research coming along?")
+
+    asyncio.run(run())
+
+
+def test_idle_scene_narration_is_not_spoken():
+    async def narration(*args):
+        yield "I can see a person holding a diagram."
+
+    async def run():
+        socket = Socket()
+        session = Conversation(socket, asyncio.Semaphore(1))
+        session.vision.enabled = True
+        session.vision.latest = scene()
+        session.idle_since = time.monotonic() - 60
+        with patch("services.conversation.api.generate", side_effect=narration), \
+             patch("services.conversation.api.synthesize", AsyncMock(return_value=b"RIFF")) as synthesize:
+            session._visual_observation(session.vision.latest, 0)
+            await session.proactive_task
+        synthesize.assert_not_awaited()
+        assert not socket.events
+
+    asyncio.run(run())

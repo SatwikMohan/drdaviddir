@@ -26,7 +26,7 @@ OPENAI_TTS_INSTRUCTIONS = os.environ.get("OPENAI_TTS_INSTRUCTIONS", (
     "the first word to the last. Avoid youthful brightness, American vowels, theatrical "
     "acting, forced depth, or exaggerated old-fashioned diction."
 ))
-OPENAI_TTS_SPEED = float(os.environ.get("OPENAI_TTS_SPEED", "0.9"))
+OPENAI_TTS_SPEED = float(os.environ.get("OPENAI_TTS_SPEED", "1.1"))
 OPENAI_TIMEOUT_SECONDS = 45
 OPENAI_MAX_RETRIES = 0
 OPENAI_MAX_CONCURRENT = 4
