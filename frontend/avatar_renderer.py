@@ -222,7 +222,9 @@ try {
  function frame(now){
   requestAnimationFrame(frame);const delta=clock.getDelta(),time=now/1000,state=stage.dataset.state;
   if(root){
-   root.rotation.y=0;
+   root.rotation.y=state==="processing"?Math.sin(time*.8)*.012:0;
+   root.rotation.x=state==="processing"?.012:0;
+   root.rotation.z=state==="speaking"&&stage.dataset.delivery==="warm"?-.006:0;
    root.position.y=baseY+Math.sin(time*(state==="listening"?1.8:1.1))*.013;
   }
   let energy=0;

@@ -7,7 +7,7 @@ export function wavBuffer(chunks,rate){
 }
 export class InteractionManager{
  constructor(cfg){this.cfg=cfg;this.id=null;this.userId=localStorage.getItem("penmanUserId")||crypto.randomUUID();localStorage.setItem("penmanUserId",this.userId);this.queue=[];this.state="idle";this.epoch=0;this.recording=false;this.playing=false;this.recoverable=false;this.preRoll=[];this.barge=0;this.frames=[];this.connect()}
- setState(state,message){this.state=state;stage.dataset.state=state;status.textContent=message||({idle:"Tap the microphone to begin",listening:"I'm listening... Pause when you have finished.",processing:"Just a moment...",transcribing:"Just a moment...",retrieving:"Just a moment...",generating:"Just a moment...",speaking:"You may speak to interrupt",interrupted:"I'm listening...",error:"Please try again"}[state]||"");button.setAttribute("aria-label",this.recoverable?"Retry remaining speech":state==="speaking"?"Interrupt and speak":"Start speaking");button.disabled=state==="listening";const reported=state==="speaking"&&this.proactivePlaying?"proactive_speaking":state;if(this.socket?.readyState===WebSocket.OPEN&&this.lastReportedState!==reported){this.lastReportedState=reported;this.send({type:"client_state",state:reported})}}
+ setState(state,message){this.state=state;stage.dataset.state=state;status.textContent=message||({idle:"Tap the microphone to begin",listening:"I'm listening... Pause when you have finished.",processing:"Listening back to your question...",transcribing:"Listening back to your question...",retrieving:"Checking the relevant details...",generating:"Putting an answer together...",speaking:"You may speak to interrupt",interrupted:"I'm listening...",error:"Please try again"}[state]||"");button.setAttribute("aria-label",this.recoverable?"Retry remaining speech":state==="speaking"?"Interrupt and speak":"Start speaking");button.disabled=state==="listening";const reported=state==="speaking"&&this.proactivePlaying?"proactive_speaking":state;if(this.socket?.readyState===WebSocket.OPEN&&this.lastReportedState!==reported){this.lastReportedState=reported;this.send({type:"client_state",state:reported})}}
  connect(){this.socket=new WebSocket(`${location.protocol==="https:"?"wss":"ws"}://${location.host}/voice`);this.socket.onopen=()=>{this.lastReportedState=null;button.disabled=false;this.setState("idle");if(this.cameraStream)this.send({type:"camera_start"})};this.socket.onmessage=e=>this.event(JSON.parse(e.data));this.socket.onclose=()=>this.fail("The connection closed. Tap the microphone to reconnect.");this.socket.onerror=()=>this.fail("Cannot connect to the conversation service.")}
  send(message){if(this.socket.readyState!==WebSocket.OPEN)throw Error("Connection unavailable");this.socket.send(JSON.stringify(message))}
  async prepare(){
@@ -29,10 +29,10 @@ export class InteractionManager{
    await window.prepareAvatarAudio?.();await this.prepare();await this.context.resume();this.begin();
   }catch(error){this.fail(error.name==="NotAllowedError"?"Please allow microphone access in your browser.":error.message)}finally{this.starting=false}
  }
- stopAudio(){audio.pause();audio.removeAttribute("src");audio.load();if(this.url)URL.revokeObjectURL(this.url);this.url=null;this.queue=[];this.playing=false;this.proactivePlaying=false;this.currentAudio=null}
+ stopAudio(){audio.pause();audio.removeAttribute("src");audio.load();if(this.url)URL.revokeObjectURL(this.url);this.url=null;this.queue=[];this.playing=false;this.proactivePlaying=false;this.currentAudio=null;stage.dataset.delivery="neutral"}
  begin(){
   const interrupted=this.state==="speaking";this.epoch++;this.send({type:"cancel",request_id:this.id});this.stopAudio();clearTimeout(this.timer);
-  this.id=crypto.randomUUID();this.nextSequence=0;this.recoverable=false;this.done=false;this.recording=true;this.frames=[...this.preRoll];this.preRoll=[];this.started=performance.now();this.speechMs=0;this.lastSpeech=this.started;this.barge=0;
+  this.id=crypto.randomUUID();this.nextSequence=0;this.recoverable=false;this.done=false;this.recording=true;this.workMessage="Listening back to your question...";this.frames=[...this.preRoll];this.preRoll=[];this.started=performance.now();this.speechMs=0;this.lastSpeech=this.started;this.barge=0;
   if(interrupted)this.setState("interrupted");this.setState("listening");
   this.recordTimer=setTimeout(()=>this.submit(),this.cfg.maxRecordingMs);
  }
@@ -60,7 +60,8 @@ export class InteractionManager{
    return;
   }
   if(message.request_id!==this.id)return;
-  if(message.type==="state"){if(!this.playing)this.setState(["transcribing","retrieving","generating"].includes(message.state)?"processing":message.state)}
+  if(message.type==="state"){const labels={transcribing:"Listening back to your question...",analysing:"Looking at the current scene...",retrieving:"Checking the relevant details...",generating:"Putting an answer together...",synthesizing:"Preparing my spoken reply..."};this.workMessage=labels[message.state]||"";if(!this.playing)this.setState(labels[message.state]?"processing":message.state,labels[message.state])}
+  else if(message.type==="behaviour"){this.workMessage=message.text;if(!this.playing)this.setState("processing",message.text)}
   else if(message.type==="audio"){
    if(message.sequence!==this.nextSequence||this.queue.length>=this.cfg.queueLimit){this.fail("Audio arrived out of order. Please try again.");return}
    this.nextSequence++;this.queue.push(message);this.playNext();
@@ -69,10 +70,10 @@ export class InteractionManager{
  }
  async playNext(){
   if(this.playing||!this.queue.length)return;this.playing=true;
-  const segment=this.queue.shift(), epoch=this.epoch;this.currentAudio=segment;
+  const segment=this.queue.shift(), epoch=this.epoch;this.currentAudio=segment;stage.dataset.delivery=segment.delivery||"neutral";
   try{
    const bytes=Uint8Array.from(atob(segment.audio),c=>c.charCodeAt(0));this.url=URL.createObjectURL(new Blob([bytes],{type:segment.mime}));audio.src=this.url;
-   audio.onended=()=>{if(epoch!==this.epoch)return;this.send({type:"played",request_id:this.id,sequence:segment.sequence});URL.revokeObjectURL(this.url);this.url=null;this.playing=false;this.currentAudio=null;this.playNext();this.finish()};
+   audio.onended=()=>{if(epoch!==this.epoch)return;this.send({type:"played",request_id:this.id,sequence:segment.sequence});URL.revokeObjectURL(this.url);this.url=null;this.playing=false;this.currentAudio=null;stage.dataset.delivery="neutral";if(!this.queue.length&&!this.done)this.setState("processing",this.workMessage||"I'm still considering your question...");this.playNext();this.finish()};
    audio.onerror=()=>{if(epoch===this.epoch)this.fail("Audio playback failed. Tap the microphone to speak again.")};
    await audio.play();if(epoch===this.epoch){if(segment.sequence===0)this.send({type:"audible",request_id:this.id,latency_ms:Math.round(performance.now()-this.sentAt)});this.setState("speaking")}
   }catch{if(epoch===this.epoch)this.fail("Audio playback is blocked. Tap the microphone and try again.")}

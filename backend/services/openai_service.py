@@ -98,14 +98,25 @@ async def generate(messages, instructions):
                 elif event.type in {"response.failed", "response.incomplete", "error"}:
                     raise RuntimeError("Generation did not complete")
 
-async def synthesize(text):
+DELIVERY_HINTS = {
+    "warm": "Use a warm, welcoming inflection.",
+    "empathetic": "Use a gentle, steady, empathetic inflection without sounding overly emotional.",
+    "curious": "Sound quietly interested and engaged.",
+    "thoughtful": "Sound reflective and composed, without slowing the pace.",
+}
+
+
+async def synthesize(text, delivery=None):
     with usage("speech", config.OPENAI_TTS_MODEL) as record:
         # One request per complete group; binary chunks are assembled into one playable WAV.
         voice = ({"id": config.OPENAI_TTS_CUSTOM_VOICE_ID}
                  if config.OPENAI_TTS_CUSTOM_VOICE_ID else config.OPENAI_TTS_VOICE)
+        instructions = config.OPENAI_TTS_INSTRUCTIONS
+        if delivery in DELIVERY_HINTS:
+            instructions += " " + DELIVERY_HINTS[delivery]
         async with async_client().audio.speech.with_streaming_response.create(
             model=config.OPENAI_TTS_MODEL, voice=voice, input=text,
-            instructions=config.OPENAI_TTS_INSTRUCTIONS, speed=config.OPENAI_TTS_SPEED, response_format="wav") as response:
+            instructions=instructions, speed=config.OPENAI_TTS_SPEED, response_format="wav") as response:
             chunks = []
             async for chunk in response.iter_bytes():
                 chunks.append(chunk)

@@ -94,6 +94,12 @@ AUDIO_ACK_TIMEOUT_SECONDS = 90
 TTS_STREAM_MIN_CHARS = 30
 TTS_STREAM_MAX_CHARS = 320
 TTS_STREAM_MAX_BUFFER_SECONDS = 1.5
+CONVERSATIONAL_BEHAVIOUR_ENABLED = os.environ.get("CONVERSATIONAL_BEHAVIOUR_ENABLED", "1").lower() not in {"0", "false", "no"}
+ACKNOWLEDGEMENT_ENABLED = os.environ.get("ACKNOWLEDGEMENT_ENABLED", "1").lower() not in {"0", "false", "no"}
+PROGRESS_UPDATES_ENABLED = os.environ.get("PROGRESS_UPDATES_ENABLED", "1").lower() not in {"0", "false", "no"}
+ACKNOWLEDGEMENT_DELAY_MS = int(os.environ.get("ACKNOWLEDGEMENT_DELAY_MS", "900"))
+PROGRESS_UPDATE_DELAY_MS = int(os.environ.get("PROGRESS_UPDATE_DELAY_MS", "8000"))
+PHRASE_REPETITION_WINDOW = int(os.environ.get("PHRASE_REPETITION_WINDOW", "5"))
 AVATAR_MODEL_PATH = os.environ.get("AVATAR_MODEL_PATH", "assets/scene.gltf")
 # Legacy alias for scripts that import the former setting.
 AVATAR_MODEL_FILE = AVATAR_MODEL_PATH
@@ -168,6 +174,8 @@ def validate_config():
         raise ValueError("Invalid chunk sizes")
     if min(OPENAI_EMBED_DIMENSIONS, EMBEDDING_BATCH_SIZE, AUDIO_QUEUE_LIMIT, OPENAI_TIMEOUT_SECONDS) <= 0:
         raise ValueError("Limits must be positive")
+    if ACKNOWLEDGEMENT_DELAY_MS < 0 or PROGRESS_UPDATE_DELAY_MS <= ACKNOWLEDGEMENT_DELAY_MS or PHRASE_REPETITION_WINDOW <= 0:
+        raise ValueError("Invalid conversational behaviour timing")
     if not 0 < RECORDING_MIN_SPEECH_MS < RECORDING_MAX_MS:
         raise ValueError("Invalid recording duration")
     if VISION_FRAME_WIDTH < 64 or VISION_FRAME_WIDTH > 1024 or VISION_CAPTURE_INTERVAL_MS < 500:

@@ -86,10 +86,12 @@ Current information uses Brave search when `BRAVE_SEARCH_API_KEY` is set and
 `WEB_SEARCH_ENABLED` is true. Search failure or missing credentials are passed to
 the answer prompt as unavailable; the assistant must not invent current facts.
 No model query rewriting, classification, per-passage calls or semantic validation
-calls are used. Requests stream into a bounded sentence queue. A single synthesis
-worker feeds ordered audio with playback acknowledgements and bounded lookahead.
+calls are used. Requests stream into a bounded sentence queue. The answer synthesis
+worker and optional conversational cues feed one ordered audio sequence with playback acknowledgements and bounded lookahead.
 WAV bytes stream from OpenAI into each segment; playback begins when that segment
 is complete, while later sentences are being synthesized.
+
+Short, intent-aware cues may acknowledge slower questions, and one stage-based progress line may follow during a long wait. Fast answers skip these cues. The browser shows the current processing stage immediately. See [conversational behaviour](docs/CONVERSATIONAL_BEHAVIOUR.md) for timing, configuration and validation.
 
 The microphone is the only input control. One click grants capture; silence ends
 the utterance. After speech, the button is ready for the next turn. While the
