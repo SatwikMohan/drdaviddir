@@ -115,9 +115,9 @@ See [OpenAI Speech documentation](https://developers.openai.com/api/docs/guides/
 [chat model](https://developers.openai.com/api/docs/models/gpt-5.4-mini), and
 [embeddings](https://developers.openai.com/api/docs/guides/embeddings).
 
-Onyx is the default voice, matching the settings used to make
-`voice-audition/onyx-british-mature.wav`. The WAV is a fixed audition sample;
-new replies are generated with the same voice settings.
+Onyx is the default voice, with instructions for a mature Southern British
+professor speaking at a normal conversational pace. `voice-audition/onyx-british-mature.wav`
+is an earlier fixed audition sample; new replies use the current instructions.
 Voice and accent are subjective; audition the output before using it with an audience.
 Set `OPENAI_TTS_VOICE` to another built-in voice if preferred. For an approved
 recorded custom voice, set `OPENAI_TTS_CUSTOM_VOICE_ID` to its voice ID; it takes

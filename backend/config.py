@@ -14,19 +14,58 @@ OPENAI_CHAT_MODEL = os.environ.get("OPENAI_CHAT_MODEL", "gpt-5.4-mini")
 OPENAI_EMBED_MODEL = "text-embedding-3-small"
 OPENAI_EMBED_DIMENSIONS = 1536
 OPENAI_STT_MODEL = "gpt-transcribe"
-OPENAI_TTS_MODEL = os.environ.get("OPENAI_TTS_MODEL", "gpt-4o-mini-tts")
-OPENAI_TTS_VOICE = os.environ.get("OPENAI_TTS_VOICE", "onyx")
-OPENAI_TTS_CUSTOM_VOICE_ID = os.environ.get("OPENAI_TTS_CUSTOM_VOICE_ID", "").strip()
-OPENAI_TTS_INSTRUCTIONS = os.environ.get("OPENAI_TTS_INSTRUCTIONS", (
-    "Speak English throughout with a strong, authentic British accent: educated Southern British "
-    "pronunciation, clear non-rhotic vowels, and natural British stress and intonation. "
-    "Sound like a man in his late forties to sixties, with a mature, resonant baritone, "
-    "a comfortable mid-low register, and a little natural vocal texture. Speak calmly "
-    "and warmly at a natural, medium conversational pace. Keep the accent consistent from "
-    "the first word to the last. Avoid youthful brightness, American vowels, theatrical "
-    "acting, forced depth, or exaggerated old-fashioned diction."
+
+
+OPENAI_TTS_MODEL = os.environ.get(
+    "OPENAI_TTS_MODEL", "gpt-4o-mini-tts"
+)
+
+OPENAI_TTS_VOICE = os.environ.get(
+    "OPENAI_TTS_VOICE", "cedar"
+)
+
+OPENAI_TTS_CUSTOM_VOICE_ID = os.environ.get(
+    "OPENAI_TTS_CUSTOM_VOICE_ID", ""
+).strip()
+
+OPENAI_TTS_INSTRUCTIONS = os.environ.get(
+    "OPENAI_TTS_INSTRUCTIONS",
+    (
+        "Speak as a distinguished British college principal "
+        "in his early fifties. Use authentic, educated Southern "
+        "British English. "
+
+        "Your voice is commanding, masculine, mature and naturally "
+        "resonant. It has substantial vocal weight, a firm low-mid "
+        "register, rich chest resonance and a subtle gravelly texture. "
+
+        "Speak with authority and conviction. Your words should "
+        "carry presence and confidence, as someone accustomed to "
+        "addressing a university lecture hall. "
+
+        "Maintain a warm, gentlemanly character beneath that authority. "
+        "Be welcoming, intelligent, composed and reassuring. "
+
+        "Use firm, deliberate articulation, confident sentence endings "
+        "and naturally expressive intonation. Avoid a rising, "
+        "question-like ending on ordinary statements. "
+
+        "Speak at a natural conversational speed, never slow-motion. "
+        "Keep the delivery fluid, grounded and human. "
+
+        "Do not sound youthful, light, thin, breathy, overly polite, "
+        "cheerful or artificially bass-heavy. Avoid robotic narration "
+        "and exaggerated theatrical British pronunciation. "
+
+        "Imagine an established British college director speaking "
+        "directly to a student in his office."
+    )
+)
+
+OPENAI_TTS_SPEED = float(os.environ.get(
+    "OPENAI_TTS_SPEED", "1.0"
 ))
-OPENAI_TTS_SPEED = float(os.environ.get("OPENAI_TTS_SPEED", "1.1"))
+
 OPENAI_TIMEOUT_SECONDS = 45
 OPENAI_MAX_RETRIES = 0
 OPENAI_MAX_CONCURRENT = 4
